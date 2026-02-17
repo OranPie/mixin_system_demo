@@ -375,8 +375,22 @@ class InvokeHandler:
                 node = self.generic_visit(node)
                 if node in match_nodes:
                     call_original = ast.Lambda(
-                        args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
-                        body=node
+                        args=ast.arguments(
+                            posonlyargs=[],
+                            args=[],
+                            vararg=ast.arg(arg="_mixin_args"),
+                            kwonlyargs=[],
+                            kw_defaults=[],
+                            kwarg=ast.arg(arg="_mixin_kwargs"),
+                            defaults=[],
+                        ),
+                        body=ast.Call(
+                            func=node.func,
+                            args=[
+                                ast.Starred(value=ast.Name(id="_mixin_args", ctx=ast.Load()), ctx=ast.Load())
+                            ],
+                            keywords=[ast.keyword(arg=None, value=ast.Name(id="_mixin_kwargs", ctx=ast.Load()))],
+                        ),
                     )
 
                     args_list = ast.List(elts=list(node.args), ctx=ast.Load())

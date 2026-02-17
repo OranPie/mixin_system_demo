@@ -17,7 +17,11 @@ class CallbackInfo:
     _new_value: Any = None
 
     _ctx: Optional[Dict[str, Any]] = None
-    _call_original: Optional[Callable[[], Any]] = None
+    _call_original: Optional[Callable[..., Any]] = None
+    _call_args: Optional[List[Any]] = None
+    _call_kwargs: Optional[Dict[str, Any]] = None
+    _original_called: bool = False
+    _original_result: Any = None
 
     def cancel(self, result: Any = None) -> None:
         self._cancelled = True
@@ -56,10 +60,45 @@ class CallbackInfo:
             return dict(self._ctx["locals"])
         return {}
 
-    def call_original(self) -> Any:
+    @property
+    def parameter_name(self) -> Optional[str]:
+        if self._ctx and self._ctx.get("param") is not None:
+            return str(self._ctx["param"])
+        return None
+
+    def get_parameter(self) -> Any:
+        return self.get_value()
+
+    def set_parameter(self, new_val: Any) -> None:
+        self.set_value(new_val)
+
+    def get_call_args(self) -> tuple[List[Any], Dict[str, Any]]:
+        if self._call_args is None or self._call_kwargs is None:
+            raise RuntimeError("call arguments are only available for INVOKE injection points.")
+        return list(self._call_args), dict(self._call_kwargs)
+
+    def set_call_args(self, *args: Any, **kwargs: Any) -> None:
+        if not self._call_original:
+            raise RuntimeError("set_call_args is only available for INVOKE injection points.")
+        self._call_args = list(args)
+        self._call_kwargs = dict(kwargs)
+        if self._ctx is not None:
+            self._ctx["args"] = list(args)
+            self._ctx["kwargs"] = dict(kwargs)
+            self._ctx["call_args"] = list(args)
+            self._ctx["call_kwargs"] = dict(kwargs)
+
+    def call_original(self, *args: Any, **kwargs: Any) -> Any:
         if not self._call_original:
             raise RuntimeError("call_original is not available for this injection point.")
-        return self._call_original()
+        if args or kwargs:
+            self.set_call_args(*args, **kwargs)
+        call_args = list(self._call_args or [])
+        call_kwargs = dict(self._call_kwargs or {})
+        result = self._call_original(*call_args, **call_kwargs)
+        self._original_called = True
+        self._original_result = result
+        return result
 
 # ---------------- Condition DSL evaluation ----------------
 
@@ -158,7 +197,17 @@ def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[st
     ci._ctx = ctx2
 
     for cb in injectors:
-        cb(self_obj, ci, *rest, **cb_kwargs)
+        args_for_cb = list(rest)
+        kwargs_for_cb = dict(cb_kwargs)
+        if ci.type == TYPE.INVOKE and ci._call_args is not None and ci._call_kwargs is not None:
+            args_for_cb = list(ci._call_args)
+            kwargs_for_cb = dict(ci._call_kwargs)
+            ci._ctx["args"] = list(args_for_cb)
+            ci._ctx["kwargs"] = dict(kwargs_for_cb)
+            ci._ctx["call_args"] = list(args_for_cb)
+            ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
+
+        cb(self_obj, ci, *args_for_cb, **kwargs_for_cb)
         if ci.is_cancelled:
             return ci.result
     return None
@@ -182,11 +231,15 @@ def eval_invoke(inj_map, target: str, method: str, at_name: str, self_obj, call_
     injectors = inj_map.get(key, [])
     ci = CallbackInfo(type=TYPE.INVOKE, target=target, method=method, at_name=str(at_name), trace_id=str(time.time_ns()))
     ci._call_original = call_original
+    ci._call_args = list(args_list)
+    ci._call_kwargs = dict(kwargs_dict)
     ctx = {"args": list(args_list), "kwargs": dict(kwargs_dict), "call_args": list(args_list), "call_kwargs": dict(kwargs_dict)}
     dispatch_injectors(injectors, ci, ctx, self_obj, *args_list, **kwargs_dict)
     if ci.is_cancelled:
         return ci.result
-    return call_original()
+    if ci._original_called:
+        return ci._original_result
+    return ci.call_original()
 
 def eval_attr_write(inj_map, target: str, method: str, at_name: str, self_obj, new_value):
     key = (target, method, "ATTRIBUTE", str(at_name))

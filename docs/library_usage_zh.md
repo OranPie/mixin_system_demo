@@ -94,7 +94,11 @@ class PlayerPatch:
 - `ci.cancel(result=...)`：取消后续流程并返回结果。
 - `ci.set_value(...)`：替换当前值（适用于支持变更的注入点）。
 - `ci.get_context()`：获取标准化运行时上下文。
-- `ci.call_original()`：仅 `INVOKE` 注入点可用。
+- `ci.call_original(*args, **kwargs)`：调用原始函数（仅 `INVOKE`），可传覆盖后的参数。
+- `ci.get_call_args()` / `ci.set_call_args(*args, **kwargs)`：读取或改写 `INVOKE` 的调用参数。
+- `ci.parameter_name`、`ci.get_parameter()`、`ci.set_parameter(...)`：`PARAMETER` 注入器更易用的参数辅助接口。
+
+若注入器内部已经调用 `ci.call_original(...)`，运行时会复用该结果，不会再次重复调用原函数。
 
 不同注入点的回调参数：
 

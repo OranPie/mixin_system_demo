@@ -10,6 +10,14 @@ from .bootstrap import ensure_module_globals
 from .weave import build_injector_map
 
 class MixinLoader(importlib.machinery.SourceFileLoader):
+    def get_code(self, fullname):
+        # Always compile from source so AST weaving is applied on each fresh import.
+        # Using default SourceFileLoader.get_code may reuse stale .pyc that predates
+        # current weaving logic.
+        path = self.get_filename(fullname)
+        source = self.get_data(path)
+        return self.source_to_code(source, path)
+
     def source_to_code(self, data, path, *, _optimize=-1):
         source = data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data
         module_name = self.name

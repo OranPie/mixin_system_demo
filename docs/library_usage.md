@@ -101,7 +101,11 @@ Common methods:
 - `ci.cancel(result=...)` - short-circuit and return result.
 - `ci.set_value(...)` - replace current value (for points that support mutation).
 - `ci.get_context()` - read normalized runtime context.
-- `ci.call_original()` - available for `INVOKE` injectors.
+- `ci.call_original(*args, **kwargs)` - call original function (INVOKE only), optionally with overridden arguments.
+- `ci.get_call_args()` / `ci.set_call_args(*args, **kwargs)` - inspect or rewrite INVOKE call arguments before execution.
+- `ci.parameter_name`, `ci.get_parameter()`, `ci.set_parameter(...)` - parameter-oriented helpers for PARAMETER injectors.
+
+If an injector calls `ci.call_original(...)` itself, runtime reuses that result and will not call the original function a second time.
 
 Extra callback args by type:
 - `HEAD` / `TAIL` / `PARAMETER`: target function args/kwargs
