@@ -1,6 +1,11 @@
 import ast
 
+import pytest
+
 from mixin_system.selector import (
+    ARGS_MODE,
+    KW_MODE,
+    STARSTAR_POLICY,
     ArgAny,
     ArgAttr,
     ArgConst,
@@ -25,7 +30,7 @@ def test_callselector_exact_args_mode_requires_same_arity():
     selector = CallSelector(
         func=QualifiedSelector.of("self", "fn"),
         args=(ArgConst(1), ArgName("x")),
-        args_mode="EXACT",
+        args_mode=ARGS_MODE.EXACT,
     )
 
     assert selector.match(
@@ -45,7 +50,7 @@ def test_callselector_fail_policy_rejects_unresolved_starstar_kwargs():
         func=QualifiedSelector.of("self", "run"),
         args=(ArgAny(),),
         kwargs=KwPattern.subset(scale=ArgConst(3)),
-        starstar_policy="FAIL",
+        starstar_policy=STARSTAR_POLICY.FAIL,
     )
 
     assert not selector.match(
@@ -61,7 +66,7 @@ def test_callselector_assume_match_allows_missing_subset_kwarg_with_unknown_star
         func=QualifiedSelector.of("self", "run"),
         args=(ArgAny(),),
         kwargs=KwPattern.subset(scale=ArgConst(3)),
-        starstar_policy="ASSUME_MATCH",
+        starstar_policy=STARSTAR_POLICY.ASSUME_MATCH,
     )
 
     assert selector.match(
@@ -77,7 +82,7 @@ def test_callselector_exact_kwargs_uses_known_keys_when_starstar_unresolved():
         func=QualifiedSelector.of("self", "run"),
         args=(ArgAny(),),
         kwargs=KwPattern.exact(scale=ArgConst(3)),
-        starstar_policy="ASSUME_MATCH",
+        starstar_policy=STARSTAR_POLICY.ASSUME_MATCH,
     )
 
     assert selector.match(
@@ -86,3 +91,12 @@ def test_callselector_exact_kwargs_uses_known_keys_when_starstar_unresolved():
         {"scale": parse_expr("3")},
         has_unresolved_starstar=True,
     )
+
+
+def test_selector_choices_require_enums_not_strings():
+    with pytest.raises(TypeError, match="ARGS_MODE"):
+        CallSelector(args_mode="EXACT")
+    with pytest.raises(TypeError, match="STARSTAR_POLICY"):
+        CallSelector(starstar_policy="FAIL")
+    with pytest.raises(TypeError, match="KW_MODE"):
+        KwPattern(items=(("scale", ArgConst(3)),), mode="SUBSET")

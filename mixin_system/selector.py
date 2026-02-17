@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 # ---- Common name selectors ----
@@ -40,6 +41,19 @@ class AttrSelector:
         return ".".join(self.parts)
 
 # ---- INVOKE selectors (args/kwargs pattern) ----
+
+class ARGS_MODE(str, Enum):
+    PREFIX = "PREFIX"
+    EXACT = "EXACT"
+
+class KW_MODE(str, Enum):
+    SUBSET = "SUBSET"
+    EXACT = "EXACT"
+
+class STARSTAR_POLICY(str, Enum):
+    FAIL = "FAIL"
+    IGNORE = "IGNORE"
+    ASSUME_MATCH = "ASSUME_MATCH"
 
 class ArgPattern:
     def match(self, node) -> bool:
@@ -89,18 +103,23 @@ class ArgAttr(ArgPattern):
 @dataclass(frozen=True)
 class KwPattern:
     items: Tuple[Tuple[str, ArgPattern], ...]
-    mode: str = "SUBSET"  # SUBSET | EXACT
+    mode: KW_MODE = KW_MODE.SUBSET
 
     @staticmethod
     def subset(**patterns: ArgPattern) -> "KwPattern":
-        return KwPattern(items=tuple(sorted(patterns.items(), key=lambda kv: kv[0])), mode="SUBSET")
+        return KwPattern(items=tuple(sorted(patterns.items(), key=lambda kv: kv[0])), mode=KW_MODE.SUBSET)
 
     @staticmethod
     def exact(**patterns: ArgPattern) -> "KwPattern":
-        return KwPattern(items=tuple(sorted(patterns.items(), key=lambda kv: kv[0])), mode="EXACT")
+        return KwPattern(items=tuple(sorted(patterns.items(), key=lambda kv: kv[0])), mode=KW_MODE.EXACT)
 
     def as_dict(self) -> Dict[str, ArgPattern]:
         return dict(self.items)
+
+    def __post_init__(self):
+        mode = self.mode
+        if not isinstance(mode, KW_MODE):
+            raise TypeError("KwPattern.mode must be a KW_MODE enum value.")
 
 @dataclass(frozen=True)
 class CallSelector:
@@ -116,9 +135,17 @@ class CallSelector:
     """
     func: Optional[QualifiedSelector] = None
     args: Tuple[ArgPattern, ...] = ()
-    args_mode: str = "PREFIX"  # PREFIX | EXACT
+    args_mode: ARGS_MODE = ARGS_MODE.PREFIX
     kwargs: Optional[KwPattern] = None
-    starstar_policy: str = "FAIL"  # FAIL | IGNORE | ASSUME_MATCH
+    starstar_policy: STARSTAR_POLICY = STARSTAR_POLICY.FAIL
+
+    def __post_init__(self):
+        args_mode = self.args_mode
+        if not isinstance(args_mode, ARGS_MODE):
+            raise TypeError("args_mode must be an ARGS_MODE enum value.")
+        starstar_policy = self.starstar_policy
+        if not isinstance(starstar_policy, STARSTAR_POLICY):
+            raise TypeError("starstar_policy must be a STARSTAR_POLICY enum value.")
 
     def match(
         self,
@@ -134,8 +161,8 @@ class CallSelector:
                 return False
 
         # args
-        mode = (self.args_mode or "PREFIX").upper()
-        if mode == "EXACT":
+        mode = self.args_mode
+        if mode == ARGS_MODE.EXACT:
             if len(args_nodes) != len(self.args):
                 return False
         if len(args_nodes) < len(self.args):
@@ -145,17 +172,17 @@ class CallSelector:
                 return False
 
         # kwargs / **kwargs
-        starstar_policy = (self.starstar_policy or "FAIL").upper()
-        if has_unresolved_starstar and starstar_policy == "FAIL":
+        starstar_policy = self.starstar_policy
+        if has_unresolved_starstar and starstar_policy == STARSTAR_POLICY.FAIL:
             return False
 
         if self.kwargs is not None:
-            kwmode = (self.kwargs.mode or "SUBSET").upper()
+            kwmode = self.kwargs.mode
             pats = self.kwargs.as_dict()
 
             missing = [k for k in pats.keys() if k not in kwargs_nodes]
             if missing:
-                if has_unresolved_starstar and starstar_policy == "ASSUME_MATCH" and kwmode == "SUBSET":
+                if has_unresolved_starstar and starstar_policy == STARSTAR_POLICY.ASSUME_MATCH and kwmode == KW_MODE.SUBSET:
                     missing = []
                 else:
                     return False
@@ -164,7 +191,7 @@ class CallSelector:
                 if k in kwargs_nodes and not pat.match(kwargs_nodes[k]):
                     return False
 
-            if kwmode == "EXACT":
+            if kwmode == KW_MODE.EXACT:
                 if set(kwargs_nodes.keys()) != set(pats.keys()):
                     return False
 

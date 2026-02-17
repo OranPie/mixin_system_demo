@@ -1,8 +1,8 @@
 import mixin_system
 from mixin_system import (
-    mixin, inject, At, TYPE, OP, Loc, When,
+    mixin, inject, At, TYPE, OP, Loc, When, OCCURRENCE,
     CallSelector, QualifiedSelector, ArgAny, ArgConst,
-    SliceSpec, AnchorSpec, NearSpec, KwPattern
+    SliceSpec, AnchorSpec, NearSpec, KwPattern, STARSTAR_POLICY
 )
 
 @mixin(target="demo_game.game.player.player.Player")
@@ -89,7 +89,7 @@ class PlayerCombatPatch:
             name=1.0,
             location=Loc(
                 near=NearSpec(anchor=At(type=TYPE.INVOKE, name="self.calculate_physics"), max_distance=1),
-                occurrence="FIRST"
+                occurrence=OCCURRENCE.FIRST
             )
         )
     )
@@ -107,7 +107,7 @@ class PlayerCombatPatch:
                 func=QualifiedSelector.of("self","physics2"),
                 args=(ArgAny(),),
                 kwargs=KwPattern.subset(scale=ArgConst(3)),
-                starstar_policy="FAIL",
+                starstar_policy=STARSTAR_POLICY.FAIL,
             ),
             location=Loc(condition=When("kwargs.scale", OP.EQ, 3))
         )
@@ -124,7 +124,7 @@ class PlayerCombatPatch:
                 func=QualifiedSelector.of("self","physics2"),
                 args=(ArgAny(),),
                 kwargs=KwPattern.subset(scale=ArgConst(3)),
-                starstar_policy="FAIL",
+                starstar_policy=STARSTAR_POLICY.FAIL,
             )
         )
     )
@@ -140,7 +140,7 @@ class PlayerCombatPatch:
                 func=QualifiedSelector.of("self","physics2"),
                 args=(ArgAny(),),
                 kwargs=KwPattern.subset(scale=ArgConst(3)),
-                starstar_policy="ASSUME_MATCH",
+                starstar_policy=STARSTAR_POLICY.ASSUME_MATCH,
             )
         )
     )

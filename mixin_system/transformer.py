@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ast
 from typing import Any, Dict, List, Tuple, Optional
-from .model import TYPE, At
+from .model import TYPE, At, POLICY
 from .registry import REGISTRY, InjectorSpec
 from .handlers import get_handler
 from .errors import MixinMatchError
@@ -16,6 +16,34 @@ class MixinTransformer(ast.NodeTransformer):
         self.module_name = module_name
         self.debug = debug
         super().__init__()
+
+    def _policy(self, spec: InjectorSpec) -> POLICY:
+        pol = spec.policy
+        if isinstance(pol, POLICY):
+            return pol
+        raise TypeError(f"Injector policy must be POLICY enum, got {type(pol).__name__}")
+
+    def _warn(self, msg: str) -> None:
+        print(f"[mixin warn] {msg}")
+
+    def _handle_count_mismatch(self, *, kind: str, spec: InjectorSpec, matched: int, expected: int, target: str, method: str) -> None:
+        pol = self._policy(spec)
+        msg = (
+            f"{kind} mismatch for {target}.{method} {spec.callback.__qualname__}: "
+            f"matched {matched} != {kind} {expected}"
+        )
+        if kind == "require":
+            if pol in (POLICY.ERROR, POLICY.STRICT):
+                raise MixinMatchError(msg)
+            if pol == POLICY.WARN:
+                self._warn(msg)
+            return
+
+        # kind == "expect"
+        if pol == POLICY.STRICT:
+            raise MixinMatchError(msg)
+        if pol in (POLICY.ERROR, POLICY.WARN):
+            self._warn(msg)
 
     def visit_ClassDef(self, node: ast.ClassDef):
         # Determine fully qualified target for this class: module.ClassName
@@ -36,8 +64,22 @@ class MixinTransformer(ast.NodeTransformer):
                     # enforce require/expect for each spec (simple: same match count)
                     for spec in specs:
                         if spec.require is not None and len(matches) != spec.require:
-                            raise MixinMatchError(f"Require failed for {target}.{item.name} {spec.callback.__qualname__}: matched {len(matches)} != require {spec.require}")
-                        if spec.expect is not None and len(matches) != spec.expect and self.debug:
-                            print(f"[mixin warn] Expect mismatch for {target}.{item.name} {spec.callback.__qualname__}: matched {len(matches)} != expect {spec.expect}")
+                            self._handle_count_mismatch(
+                                kind="require",
+                                spec=spec,
+                                matched=len(matches),
+                                expected=spec.require,
+                                target=target,
+                                method=item.name,
+                            )
+                        if spec.expect is not None and len(matches) != spec.expect:
+                            self._handle_count_mismatch(
+                                kind="expect",
+                                spec=spec,
+                                matched=len(matches),
+                                expected=spec.expect,
+                                target=target,
+                                method=item.name,
+                            )
                     handler.instrument(item, matches, specs, target)
         return node

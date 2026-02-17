@@ -60,14 +60,28 @@ class PlayerPatch:
     ...
 ```
 
+You can also set mixin-level ordering:
+
+```python
+@mixin(target="my_game.player.Player", priority=10)
+class PlayerPatch:
+    ...
+```
+
 ### `@inject(method=..., at=..., priority=..., require=..., expect=...)`
 - `method`: target method name on the target class.
 - `at`: an `At(...)` object describing injection type and matching details.
 - `priority`: lower values run earlier.
 - `require`: strict expected match count; mismatch raises `MixinMatchError`.
-- `expect`: warning-only count check when `MIXIN_DEBUG=True`.
+- `expect`: expected match count.
+- `policy`: `POLICY` enum controlling mismatch handling.
 
-`policy` exists in the API but is currently a placeholder in this demo implementation.
+`policy` choices:
+
+- `POLICY.ERROR` (default): `require` mismatch raises error; `expect` mismatch warns.
+- `POLICY.WARN`: `require`/`expect` mismatch warns.
+- `POLICY.IGNORE`: ignore both mismatch checks.
+- `POLICY.STRICT`: both `require` and `expect` mismatch raise error.
 
 ### Ergonomic helpers (optional)
 
@@ -103,8 +117,11 @@ There are matching shortcut decorators:
 | --- | --- |
 | `@mixin(target="pkg.mod.Class")` | Direct string target; recommended when patch and target are in different modules/packages. |
 | `@mixin(target=SomeClass)` | Auto-resolves to `module.qualname`; avoids typo in target path. |
+| `@mixin(..., priority=N)` | Sets mixin-level ordering for one target (lower runs earlier). |
 | `init(debug=True)` | Enables AST dump output (`__pycache__/mixin_dump/*.py`) for rewritten modules. |
 | `init(debug=False)` or default | No AST dump output. |
+
+Note: choice fields use enums (not raw strings). Passing string literals for enum fields raises `TypeError`.
 
 ### `inject(...)` choices
 
@@ -113,7 +130,7 @@ There are matching shortcut decorators:
 | `priority` | int (default `100`) | Lower runs earlier inside the same injection key `(target, method, type, at_name)`. |
 | `require` | `None` or int | If set and actual match count differs, raises `MixinMatchError` and aborts transform. |
 | `expect` | `None` or int | If set and debug enabled, prints warning on mismatch; does not abort. |
-| `policy` | string | Currently placeholder in demo runtime (no behavior change). |
+| `policy` | `POLICY.ERROR` / `WARN` / `IGNORE` / `STRICT` | Controls behavior when `require`/`expect` mismatch occurs. |
 
 ### `TYPE` behavioral choices
 
@@ -182,13 +199,13 @@ Use `CallSelector` for structural matching:
 
 | Selector option | Choices | Effect |
 | --- | --- | --- |
-| `args_mode` | `PREFIX` (default) | Call can have extra positional args after patterns. |
-| `args_mode` | `EXACT` | Call positional arg count must equal pattern count. |
-| `KwPattern.mode` | `SUBSET` | Required keyword patterns must exist and match (unless ASSUME_MATCH + unresolved `**kwargs`). |
-| `KwPattern.mode` | `EXACT` | Known kwargs key set must exactly match pattern key set. |
-| `starstar_policy` | `FAIL` | Any unresolved `**expr` causes non-match. |
-| `starstar_policy` | `IGNORE` | Unresolved `**expr` allowed; does not satisfy missing required keys. |
-| `starstar_policy` | `ASSUME_MATCH` | For `SUBSET`, missing required keys may be assumed present when unresolved `**expr` exists; `EXACT` behaves like `IGNORE`. |
+| `args_mode` | `ARGS_MODE.PREFIX` (default) | Call can have extra positional args after patterns. |
+| `args_mode` | `ARGS_MODE.EXACT` | Call positional arg count must equal pattern count. |
+| `KwPattern.mode` | `KW_MODE.SUBSET` | Required keyword patterns must exist and match (unless ASSUME_MATCH + unresolved `**kwargs`). |
+| `KwPattern.mode` | `KW_MODE.EXACT` | Known kwargs key set must exactly match pattern key set. |
+| `starstar_policy` | `STARSTAR_POLICY.FAIL` | Any unresolved `**expr` causes non-match. |
+| `starstar_policy` | `STARSTAR_POLICY.IGNORE` | Unresolved `**expr` allowed; does not satisfy missing required keys. |
+| `starstar_policy` | `STARSTAR_POLICY.ASSUME_MATCH` | For `SUBSET`, missing required keys may be assumed present when unresolved `**expr` exists; `EXACT` behaves like `IGNORE`. |
 
 ## Location constraints
 
@@ -205,9 +222,9 @@ Filtering order is: `slice -> near -> anchor -> occurrence -> ordinal`.
 
 | Option | Choices | Effect |
 | --- | --- | --- |
-| `occurrence` | `ALL` (default) | Keep all matches after earlier filters. |
-| `occurrence` | `FIRST` | Keep first ordered match only. |
-| `occurrence` | `LAST` | Keep last ordered match only. |
+| `occurrence` | `OCCURRENCE.ALL` (default) | Keep all matches after earlier filters. |
+| `occurrence` | `OCCURRENCE.FIRST` | Keep first ordered match only. |
+| `occurrence` | `OCCURRENCE.LAST` | Keep last ordered match only. |
 | `ordinal` | `None` or int | Pick match by 0-based index after occurrence filter. |
 | `slice.from_anchor` / `slice.to_anchor` | `At` or `None` | Supports one-sided ranges (start-only or end-only). |
 | `slice.include_from` / `slice.include_to` | bool | Include/exclude anchor boundary in range checks. |
@@ -232,6 +249,18 @@ The transformed source is dumped under `__pycache__/mixin_dump/`.
 - `RuntimeError` from `call_original`/`set_call_args`: thrown when used outside `INVOKE`.
 - `TypeError` from `merge_kwargs`: duplicate keyword keys while merging explicit kwargs and `**kwargs`.
 - Import hook recompiles from source on load so AST weaving logic changes apply consistently even if old bytecode exists.
+
+## Multiple mixins on one target (resolver rules)
+
+When many mixins inject into the same target method, execution order is deterministic:
+
+1. `mixin priority` (from `@mixin(..., priority=...)`, ascending)
+2. injector `priority` (from `@inject(..., priority=...)`, ascending)
+3. mixin class path (lexicographic)
+4. callback qualname (lexicographic)
+5. registration index (earlier registration first)
+
+This allows coarse ordering at mixin level and fine ordering per injector inside each mixin.
 
 ## Practical tips
 

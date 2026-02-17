@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from typing import Any, Callable
 
 from .builtin_handlers import install_builtin_handlers
 from .hook import install_import_hook
-from .model import At, Loc, TYPE
+from .model import At, Loc, POLICY, TYPE
 from .registry import InjectorSpec, REGISTRY
 
 
@@ -44,13 +45,15 @@ def init(*, debug: bool | None = None) -> None:
     REGISTRY.freeze()
 
 
-def mixin(target: str | type):
+def mixin(target: str | type, *, priority: int = 100):
     resolved_target = target_path(target)
+    mixin_priority = int(priority)
 
     def deco(cls):
         cls.__mixin_target__ = resolved_target
+        cls.__mixin_priority__ = mixin_priority
         try:
-            REGISTRY.register_mixin(resolved_target, cls)
+            REGISTRY.register_mixin(resolved_target, cls, priority=mixin_priority)
         except RuntimeError as exc:
             _ensure_registration_allowed(exc)
 
@@ -58,8 +61,9 @@ def mixin(target: str | type):
         for _, attr in cls.__dict__.items():
             spec = getattr(attr, "__inject_spec__", None)
             if spec:
+                resolved = replace(spec, mixin_cls=cls, mixin_priority=mixin_priority)
                 try:
-                    REGISTRY.register_injector(resolved_target, spec)
+                    REGISTRY.register_injector(resolved_target, resolved)
                 except RuntimeError as exc:
                     _ensure_registration_allowed(exc)
         return cls
@@ -73,12 +77,14 @@ def inject(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     if not isinstance(method, str) or not method.strip():
         raise ValueError("method must be a non-empty string.")
     if not isinstance(at, At):
         raise TypeError("at must be an At(...) instance.")
+    if not isinstance(policy, POLICY):
+        raise TypeError("policy must be a POLICY enum value.")
 
     def deco(fn: Callable):
         # The runtime callback signature used by handlers is (ci, *args, **kwargs)
@@ -129,7 +135,7 @@ def inject_head(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(method=method, at=at_head(location=location), priority=priority, require=require, expect=expect, policy=policy)
 
@@ -141,7 +147,7 @@ def inject_tail(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(method=method, at=at_tail(location=location), priority=priority, require=require, expect=expect, policy=policy)
 
@@ -154,7 +160,7 @@ def inject_parameter(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(
         method=method,
@@ -174,7 +180,7 @@ def inject_const(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(
         method=method,
@@ -195,7 +201,7 @@ def inject_invoke(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(
         method=method,
@@ -215,7 +221,7 @@ def inject_attribute(
     priority: int = 100,
     require: int | None = None,
     expect: int | None = None,
-    policy: str = "ERROR",
+    policy: POLICY = POLICY.ERROR,
 ):
     return inject(
         method=method,

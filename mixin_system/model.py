@@ -22,6 +22,17 @@ class OP(str, Enum):
     AND="AND"; OR="OR"; NOT="NOT"
     ISINSTANCE="ISINSTANCE"
 
+class POLICY(str, Enum):
+    ERROR = "ERROR"
+    WARN = "WARN"
+    IGNORE = "IGNORE"
+    STRICT = "STRICT"
+
+class OCCURRENCE(str, Enum):
+    ALL = "ALL"
+    FIRST = "FIRST"
+    LAST = "LAST"
+
 @dataclass(frozen=True)
 class When:
     """Safe condition DSL node."""
@@ -45,11 +56,16 @@ class When:
 class Loc:
     """Location constraints (extensible)."""
     ordinal: Optional[int] = None           # match the Nth occurrence (0-based)
-    occurrence: str = "ALL"                 # ALL | FIRST | LAST
+    occurrence: OCCURRENCE = OCCURRENCE.ALL
     condition: Optional[When] = None        # runtime condition (checked by wrapper)
     slice: Optional[SliceSpec] = None       # limit to region between anchors
     near: Optional[NearSpec] = None         # limit to neighborhood of anchor (statement distance)
     anchor: Optional[AnchorSpec] = None     # select relative to anchor
+
+    def __post_init__(self):
+        occ = self.occurrence
+        if not isinstance(occ, OCCURRENCE):
+            raise TypeError("occurrence must be an OCCURRENCE enum value.")
 
 @dataclass(frozen=True)
 class At:

@@ -3,7 +3,7 @@ import os
 import pytest
 
 from mixin_system import api
-from mixin_system.model import TYPE
+from mixin_system.model import OCCURRENCE, POLICY, TYPE, Loc
 
 
 class _FakeRegistry:
@@ -12,8 +12,8 @@ class _FakeRegistry:
         self.injectors = []
         self.freeze_calls = 0
 
-    def register_mixin(self, target, cls):
-        self.mixins.append((target, cls))
+    def register_mixin(self, target, cls, priority=100):
+        self.mixins.append((target, cls, priority))
 
     def register_injector(self, target, spec):
         self.injectors.append((target, spec))
@@ -42,6 +42,14 @@ def test_inject_validates_method_and_at():
         api.inject(method="", at=api.at_head())
     with pytest.raises(TypeError, match=r"At\(\.\.\.\)"):
         api.inject(method="run", at="HEAD")
+    with pytest.raises(TypeError, match="POLICY enum"):
+        api.inject(method="run", at=api.at_head(), policy="ERROR")
+
+    @api.inject_head(method="tick", policy=POLICY.WARN)
+    def _ok(self, ci):
+        return None
+
+    assert _ok.__inject_spec__.policy == POLICY.WARN
 
 
 def test_at_helpers_build_expected_types():
@@ -51,6 +59,10 @@ def test_at_helpers_build_expected_types():
     assert api.at_const(1.0).type == TYPE.CONST
     assert api.at_invoke("self.fn").type == TYPE.INVOKE
     assert api.at_attribute("self.health").type == TYPE.ATTRIBUTE
+
+    with pytest.raises(TypeError, match="OCCURRENCE enum"):
+        Loc(occurrence="FIRST")
+    assert Loc(occurrence=OCCURRENCE.FIRST).occurrence == OCCURRENCE.FIRST
 
 
 def test_inject_shortcut_builders_attach_specs():
@@ -85,11 +97,26 @@ def test_mixin_accepts_type_target_and_registers(monkeypatch):
     assert fake.mixins[0][0] == expected_target
     assert fake.injectors[0][0] == expected_target
     assert fake.injectors[0][1].at.type == TYPE.CONST
+    assert fake.injectors[0][1].mixin_priority == 100
+
+
+def test_mixin_priority_is_forwarded_to_registry_and_injectors(monkeypatch):
+    fake = _FakeRegistry()
+    monkeypatch.setattr(api, "REGISTRY", fake)
+
+    @api.mixin("pkg.mod.Target", priority=5)
+    class Patch:
+        @api.inject_head(method="tick")
+        def on_tick(self, ci):
+            return None
+
+    assert fake.mixins[0] == ("pkg.mod.Target", Patch, 5)
+    assert fake.injectors[0][1].mixin_priority == 5
 
 
 def test_mixin_frozen_error_message_is_actionable(monkeypatch):
     class _FrozenRegistry(_FakeRegistry):
-        def register_mixin(self, target, cls):
+        def register_mixin(self, target, cls, priority=100):
             raise RuntimeError("Registry is frozen; register mixins before init() completes.")
 
     monkeypatch.setattr(api, "REGISTRY", _FrozenRegistry())

@@ -59,14 +59,28 @@ class PlayerPatch:
     ...
 ```
 
+也可设置 mixin 级优先级：
+
+```python
+@mixin(target="my_game.player.Player", priority=10)
+class PlayerPatch:
+    ...
+```
+
 ### `@inject(method=..., at=..., priority=..., require=..., expect=...)`
 - `method`：目标类的方法名。
 - `at`：`At(...)` 描述注入点与匹配方式。
 - `priority`：越小越先执行。
 - `require`：严格匹配数量；不满足会抛 `MixinMatchError`。
-- `expect`：调试模式（`MIXIN_DEBUG=True`）下的期望匹配数提示。
+- `expect`：期望匹配数量。
+- `policy`：`POLICY` 枚举，控制匹配数不一致时的处理方式。
 
-`policy` 在当前 demo 实现中仍是占位参数。
+`policy` 选项：
+
+- `POLICY.ERROR`（默认）：`require` 不匹配报错；`expect` 不匹配告警。
+- `POLICY.WARN`：`require` / `expect` 不匹配都告警。
+- `POLICY.IGNORE`：忽略 `require` / `expect` 不匹配。
+- `POLICY.STRICT`：`require` / `expect` 任一不匹配都报错。
 
 ## 选项矩阵（选择 -> 效果）
 
@@ -76,8 +90,11 @@ class PlayerPatch:
 | --- | --- |
 | `@mixin(target="pkg.mod.Class")` | 直接使用字符串路径；适合补丁模块与目标模块分离的场景。 |
 | `@mixin(target=SomeClass)` | 自动解析为 `module.qualname`，可减少目标路径拼写错误。 |
+| `@mixin(..., priority=N)` | 设置同一 target 下的 mixin 级执行顺序（值越小越先执行）。 |
 | `init(debug=True)` | 开启 AST 重写结果输出（`__pycache__/mixin_dump/*.py`）。 |
 | `init(debug=False)` 或默认 | 不输出 AST dump。 |
+
+说明：这些“选择字段”均使用枚举类型（不是字符串字面量）；传字符串会触发 `TypeError`。
 
 ### `inject(...)` 关键参数选项
 
@@ -86,7 +103,7 @@ class PlayerPatch:
 | `priority` | int（默认 `100`） | 在同一注入键 `(target, method, type, at_name)` 内，值越小越先执行。 |
 | `require` | `None` 或 int | 若实际匹配数不等于该值，抛 `MixinMatchError` 并中止转换。 |
 | `expect` | `None` 或 int | 若 debug 开启且不匹配，仅打印告警，不中止。 |
-| `policy` | string | 当前 demo 版本中为占位参数，不改变运行时行为。 |
+| `policy` | `POLICY.ERROR` / `WARN` / `IGNORE` / `STRICT` | 控制 `require`/`expect` 不匹配时的处理方式。 |
 
 ### `TYPE` 行为选项
 
@@ -176,13 +193,13 @@ Loc(condition=When("kwargs.scale", OP.EQ, 7))
 
 | 选项 | 可选值 | 效果 |
 | --- | --- | --- |
-| `args_mode` | `PREFIX`（默认） | 调用可包含额外位置参数，前缀匹配即可。 |
-| `args_mode` | `EXACT` | 调用位置参数数量必须与模式数量完全一致。 |
-| `KwPattern.mode` | `SUBSET` | 关键字模式要求的键必须存在并匹配（除非 ASSUME_MATCH + 未解析 `**kwargs`）。 |
-| `KwPattern.mode` | `EXACT` | 已知 kwargs 的键集合必须与模式键集合一致。 |
-| `starstar_policy` | `FAIL` | 存在未解析 `**expr` 时直接不匹配。 |
-| `starstar_policy` | `IGNORE` | 允许未解析 `**expr`，但它不能补足缺失必需键。 |
-| `starstar_policy` | `ASSUME_MATCH` | 对 `SUBSET`：存在未解析 `**expr` 时可假定缺失键被满足；对 `EXACT` 行为与 `IGNORE` 一致。 |
+| `args_mode` | `ARGS_MODE.PREFIX`（默认） | 调用可包含额外位置参数，前缀匹配即可。 |
+| `args_mode` | `ARGS_MODE.EXACT` | 调用位置参数数量必须与模式数量完全一致。 |
+| `KwPattern.mode` | `KW_MODE.SUBSET` | 关键字模式要求的键必须存在并匹配（除非 ASSUME_MATCH + 未解析 `**kwargs`）。 |
+| `KwPattern.mode` | `KW_MODE.EXACT` | 已知 kwargs 的键集合必须与模式键集合一致。 |
+| `starstar_policy` | `STARSTAR_POLICY.FAIL` | 存在未解析 `**expr` 时直接不匹配。 |
+| `starstar_policy` | `STARSTAR_POLICY.IGNORE` | 允许未解析 `**expr`，但它不能补足缺失必需键。 |
+| `starstar_policy` | `STARSTAR_POLICY.ASSUME_MATCH` | 对 `SUBSET`：存在未解析 `**expr` 时可假定缺失键被满足；对 `EXACT` 行为与 `IGNORE` 一致。 |
 
 ## 位置约束
 
@@ -199,9 +216,9 @@ Loc(condition=When("kwargs.scale", OP.EQ, 7))
 
 | 选项 | 可选值 | 效果 |
 | --- | --- | --- |
-| `occurrence` | `ALL`（默认） | 保留前序过滤后的全部匹配。 |
-| `occurrence` | `FIRST` | 仅保留排序后的第一个匹配。 |
-| `occurrence` | `LAST` | 仅保留排序后的最后一个匹配。 |
+| `occurrence` | `OCCURRENCE.ALL`（默认） | 保留前序过滤后的全部匹配。 |
+| `occurrence` | `OCCURRENCE.FIRST` | 仅保留排序后的第一个匹配。 |
+| `occurrence` | `OCCURRENCE.LAST` | 仅保留排序后的最后一个匹配。 |
 | `ordinal` | `None` 或 int | 在 occurrence 之后按 0-based 下标选单个匹配。 |
 | `slice.from_anchor` / `slice.to_anchor` | `At` 或 `None` | 支持单边区间（只设起点或只设终点）。 |
 | `slice.include_from` / `slice.include_to` | bool | 控制是否包含边界锚点。 |
@@ -226,6 +243,18 @@ MIXIN_DEBUG=True
 - `RuntimeError`（调用 API 使用错误）：在非 `INVOKE` 注入点使用 `call_original`/`set_call_args` 会报错。
 - `TypeError`（`merge_kwargs`）：显式 kwargs 与 `**kwargs` 合并时出现重复键。
 - 导入钩子会优先从源码重新编译，以确保 AST 注入逻辑更新后不被旧 `.pyc` 行为“粘住”。
+
+## 同一 target 多 mixin 的解析顺序（resolver 规则）
+
+当多个 mixin 注入同一个目标方法时，执行顺序是确定的，排序键依次为：
+
+1. `mixin priority`（`@mixin(..., priority=...)`，升序）
+2. injector `priority`（`@inject(..., priority=...)`，升序）
+3. mixin 类路径（字典序）
+4. 回调 `qualname`（字典序）
+5. 注册顺序（先注册先执行）
+
+这样可同时支持：mixin 级粗粒度排序 + mixin 内 injector 细粒度排序。
 
 ## 实践建议
 

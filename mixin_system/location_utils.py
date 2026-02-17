@@ -2,7 +2,7 @@ from __future__ import annotations
 import ast
 from typing import Dict, List, Optional, Tuple
 
-from .model import At, Loc
+from .model import At, Loc, OCCURRENCE
 from .handlers import get_handler
 from .location import SliceSpec, NearSpec, AnchorSpec
 
@@ -166,10 +166,10 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
                 pick = (-a.offset) - 1
             matches_sorted = [cand[pick][1]] if 0 <= pick < len(cand) else []
 
-    occ = (loc.occurrence or "ALL").upper()
-    if occ == "FIRST":
+    occ = loc.occurrence
+    if occ == OCCURRENCE.FIRST:
         matches_sorted = matches_sorted[:1]
-    elif occ == "LAST":
+    elif occ == OCCURRENCE.LAST:
         matches_sorted = matches_sorted[-1:] if matches_sorted else []
 
     if loc.ordinal is not None:
