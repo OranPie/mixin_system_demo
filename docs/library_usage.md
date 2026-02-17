@@ -95,6 +95,37 @@ There are matching shortcut decorators:
 - `INVOKE`/`ATTRIBUTE`: dotted target name (for example `"self.calculate_physics"`)
 - `HEAD`/`TAIL`: typically `None`
 
+## Option matrix (choice -> effect)
+
+### Target and init choices
+
+| Choice | Effect |
+| --- | --- |
+| `@mixin(target="pkg.mod.Class")` | Direct string target; recommended when patch and target are in different modules/packages. |
+| `@mixin(target=SomeClass)` | Auto-resolves to `module.qualname`; avoids typo in target path. |
+| `init(debug=True)` | Enables AST dump output (`__pycache__/mixin_dump/*.py`) for rewritten modules. |
+| `init(debug=False)` or default | No AST dump output. |
+
+### `inject(...)` choices
+
+| Field | Choices | Effect |
+| --- | --- | --- |
+| `priority` | int (default `100`) | Lower runs earlier inside the same injection key `(target, method, type, at_name)`. |
+| `require` | `None` or int | If set and actual match count differs, raises `MixinMatchError` and aborts transform. |
+| `expect` | `None` or int | If set and debug enabled, prints warning on mismatch; does not abort. |
+| `policy` | string | Currently placeholder in demo runtime (no behavior change). |
+
+### `TYPE` behavioral choices
+
+| `TYPE` | Where it runs | `cancel(...)` effect | `set_value(...)` effect |
+| --- | --- | --- | --- |
+| `HEAD` | Function entry | Returns provided result immediately. | No direct effect in current runtime. |
+| `TAIL` | Every explicit/implicit return point | Overrides return value. | No direct effect in current runtime. |
+| `PARAMETER` | Entry, per matched parameter | Returns immediately if cancelled. | Rebinds matched parameter before body continues. |
+| `CONST` | Constant expression site | Replaces expression result with cancelled result. | Replaces constant value. |
+| `INVOKE` | Intercepted call site | Replaces call result. | No direct effect; use call-arg APIs instead. |
+| `ATTRIBUTE` | Attribute assignment write path | Replaces assigned value with cancelled result. | Rewrites assigned value. |
+
 ## Callback behavior (`CallbackInfo`)
 
 Common methods:
@@ -112,6 +143,16 @@ Extra callback args by type:
 - `INVOKE`: intercepted call args/kwargs
 - `ATTRIBUTE`: the new value being assigned
 - `CONST`: no extra positional args (use context value)
+
+### INVOKE call control choices
+
+| Choice | Effect |
+| --- | --- |
+| `ci.get_call_args()` | Returns current `(args, kwargs)` that will be used for original call. |
+| `ci.set_call_args(*args, **kwargs)` | Updates call args for subsequent injectors and final original call. |
+| `ci.call_original()` | Calls original with current call args. |
+| `ci.call_original(*args, **kwargs)` | Overrides call args then calls original immediately. |
+| Injector calls `call_original(...)` and does not cancel | Runtime returns that captured result (no duplicate original invocation). |
 
 ## Conditions (`When` + `OP`)
 
@@ -137,6 +178,18 @@ Use `CallSelector` for structural matching:
   - `IGNORE`
   - `ASSUME_MATCH`
 
+### Selector mode matrix
+
+| Selector option | Choices | Effect |
+| --- | --- | --- |
+| `args_mode` | `PREFIX` (default) | Call can have extra positional args after patterns. |
+| `args_mode` | `EXACT` | Call positional arg count must equal pattern count. |
+| `KwPattern.mode` | `SUBSET` | Required keyword patterns must exist and match (unless ASSUME_MATCH + unresolved `**kwargs`). |
+| `KwPattern.mode` | `EXACT` | Known kwargs key set must exactly match pattern key set. |
+| `starstar_policy` | `FAIL` | Any unresolved `**expr` causes non-match. |
+| `starstar_policy` | `IGNORE` | Unresolved `**expr` allowed; does not satisfy missing required keys. |
+| `starstar_policy` | `ASSUME_MATCH` | For `SUBSET`, missing required keys may be assumed present when unresolved `**expr` exists; `EXACT` behaves like `IGNORE`. |
+
 ## Location constraints
 
 Add `location=Loc(...)` to narrow matched nodes:
@@ -148,6 +201,20 @@ Add `location=Loc(...)` to narrow matched nodes:
 
 Filtering order is: `slice -> near -> anchor -> occurrence -> ordinal`.
 
+### Location option matrix
+
+| Option | Choices | Effect |
+| --- | --- | --- |
+| `occurrence` | `ALL` (default) | Keep all matches after earlier filters. |
+| `occurrence` | `FIRST` | Keep first ordered match only. |
+| `occurrence` | `LAST` | Keep last ordered match only. |
+| `ordinal` | `None` or int | Pick match by 0-based index after occurrence filter. |
+| `slice.from_anchor` / `slice.to_anchor` | `At` or `None` | Supports one-sided ranges (start-only or end-only). |
+| `slice.include_from` / `slice.include_to` | bool | Include/exclude anchor boundary in range checks. |
+| `near.max_distance` | int | Statement-distance bound around anchor statement. |
+| `anchor.offset` | `>=0` or `<0` | Positive walks forward from anchor; negative walks backward. |
+| `anchor.inclusive` | bool | Include anchor position itself when selecting relative match. |
+
 ## Debugging and inspection
 
 Set:
@@ -157,6 +224,14 @@ MIXIN_DEBUG=True
 ```
 
 The transformed source is dumped under `__pycache__/mixin_dump/`.
+
+## Error model and runtime notes
+
+- `MixinMatchError`: raised during transform when `require` does not match actual hits.
+- `RuntimeError` (registry frozen): registering mixins/injectors after `init()` is blocked.
+- `RuntimeError` from `call_original`/`set_call_args`: thrown when used outside `INVOKE`.
+- `TypeError` from `merge_kwargs`: duplicate keyword keys while merging explicit kwargs and `**kwargs`.
+- Import hook recompiles from source on load so AST weaving logic changes apply consistently even if old bytecode exists.
 
 ## Practical tips
 
