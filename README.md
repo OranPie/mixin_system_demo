@@ -11,6 +11,7 @@ A runnable reference implementation of an **import-time AST Mixin system** (Pyth
 ## Documentation
 
 - Full usage documentation: `docs/library_usage.md`
+- 中文文档：`docs/library_usage_zh.md`
 
 ## Features
 
