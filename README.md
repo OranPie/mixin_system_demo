@@ -4,6 +4,7 @@ A runnable reference implementation of an **import-time AST Mixin system** (Pyth
 - **AST transformation** on first import (via MetaPath import hook)
 - **runtime injector dispatch** (wrapped callbacks + `CallbackInfo`)
 - **selector-based matching** and **location constraints** (slice / near / anchor)
+- **ergonomic API helpers** (`at_*`, `inject_*` shortcuts, class-target resolution)
 
 > This repo is designed to be easy to iterate on (small files, pytest tests, readable AST rewrites).
 

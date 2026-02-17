@@ -24,6 +24,8 @@ Supported injection points:
 
 `init()` freezes the registry. Registering new mixins after `init()` raises an error.
 
+`init(debug=True)` is equivalent to setting `MIXIN_DEBUG=True` before initialization.
+
 ## Minimal example
 
 ```python
@@ -50,6 +52,14 @@ from my_game.player import Player
 ### `@mixin(target="pkg.mod.Class")`
 Registers a patch class against a fully-qualified target class path.
 
+You can also pass a class object directly:
+
+```python
+@mixin(target=Player)
+class PlayerPatch:
+    ...
+```
+
 ### `@inject(method=..., at=..., priority=..., require=..., expect=...)`
 - `method`: target method name on the target class.
 - `at`: an `At(...)` object describing injection type and matching details.
@@ -58,6 +68,25 @@ Registers a patch class against a fully-qualified target class path.
 - `expect`: warning-only count check when `MIXIN_DEBUG=True`.
 
 `policy` exists in the API but is currently a placeholder in this demo implementation.
+
+### Ergonomic helpers (optional)
+
+You can use builders instead of hand-writing `At(...)` each time:
+
+- `at_head()`, `at_tail()`
+- `at_parameter("value")`
+- `at_const(1.0)`
+- `at_invoke("self.call", selector=...)`
+- `at_attribute("self.health")`
+
+There are matching shortcut decorators:
+
+- `@inject_head(method="...")`
+- `@inject_tail(method="...")`
+- `@inject_parameter(method="...", name="...")`
+- `@inject_const(method="...", value=...)`
+- `@inject_invoke(method="...", name="...", selector=...)`
+- `@inject_attribute(method="...", name="...")`
 
 ### `At(type=TYPE..., name=..., selector=..., location=...)`
 `name` meaning depends on `type`:
