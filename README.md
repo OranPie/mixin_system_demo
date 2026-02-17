@@ -7,6 +7,10 @@ A runnable reference implementation of an **import-time AST Mixin system** (Pyth
 
 > This repo is designed to be easy to iterate on (small files, pytest tests, readable AST rewrites).
 
+## Documentation
+
+- Full usage documentation: `docs/library_usage.md`
+
 ## Features
 
 ### Core injection types
