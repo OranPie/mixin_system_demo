@@ -74,3 +74,14 @@ class Player:
 
     def risky_divide(self, divisor: int) -> float:
         return self.health / divisor
+
+    def generate_items(self):
+        """Generator: yields health, then health*2."""
+        yield self.health
+        yield self.health * 2
+
+    def multi_const_lines(self) -> float:
+        """Used for line-number targeting tests."""
+        a = 10.0
+        b = 10.0
+        return a + b

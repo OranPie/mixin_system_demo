@@ -3,7 +3,7 @@ from mixin_system import (
     mixin, inject, At, TYPE, OP, Loc, When, OCCURRENCE,
     CallSelector, QualifiedSelector, ArgAny, ArgConst,
     SliceSpec, AnchorSpec, NearSpec, KwPattern, STARSTAR_POLICY,
-    at_exception,
+    at_exception, at_yield, LineSpec,
 )
 
 @mixin(target="demo_game.game.player.player.Player")
@@ -187,3 +187,45 @@ class UtilsPatch:
     def clamp_multiplier(self, ci, *args, **kw):
         if ci.get_context().get("value", 0) > 10:
             ci.set_value(10.0)
+
+
+# ---------------------------------------------------------------------------
+# Yield / Generator Interception
+# ---------------------------------------------------------------------------
+
+@mixin(target="demo_game.game.player.player.Player")
+class PlayerYieldPatch:
+    @inject(method="generate_items", at=At(type=TYPE.YIELD, name=None))
+    def double_yielded_value(self, ci, value):
+        ci.set_value(value * 10)
+
+
+# ---------------------------------------------------------------------------
+# Line-Number Targeting
+# ---------------------------------------------------------------------------
+
+@mixin(target="demo_game.game.player.player.Player")
+class PlayerLinePatch:
+    @inject(
+        method="multi_const_lines",
+        at=At(
+            type=TYPE.CONST,
+            name=10.0,
+            location=Loc(line=LineSpec(lineno=85)),  # targets only the first 10.0 on line 85
+        ),
+    )
+    def replace_first_const_only(self, ci):
+        ci.set_value(99.0)
+
+
+# ---------------------------------------------------------------------------
+# Structural Injection (new class method added by @mixin)
+# ---------------------------------------------------------------------------
+
+@mixin(target="demo_game.game.player.player.Player")
+class PlayerStructuralPatch:
+    def mixin_greet(self):
+        return f"Hello from mixin! health={self.health}"
+
+    def mixin_double_health(self):
+        return self.health * 2

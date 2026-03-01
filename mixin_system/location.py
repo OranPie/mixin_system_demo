@@ -5,6 +5,18 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .model import At
 
+
+@dataclass(frozen=True)
+class LineSpec:
+    """Select injection points at specific source line numbers (1-based, matching AST ``lineno``).
+
+    If ``end_lineno`` is given the filter accepts nodes whose ``lineno`` falls
+    inside the inclusive range ``[lineno, end_lineno]``.
+    """
+
+    lineno: int
+    end_lineno: Optional[int] = None  # inclusive upper bound; None → exact match
+
 @dataclass(frozen=True)
 class SliceSpec:
     """Limit matches to a region between anchors.

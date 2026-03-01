@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Dict
 
-from .location import SliceSpec, NearSpec, AnchorSpec
+from .location import SliceSpec, NearSpec, AnchorSpec, LineSpec
 from .selector import NameSelector, QualifiedSelector, ConstSelector, AttrSelector, CallSelector
 
 class TYPE(str, Enum):
@@ -14,6 +14,7 @@ class TYPE(str, Enum):
     ATTRIBUTE = "ATTRIBUTE"
     PARAMETER = "PARAMETER"
     EXCEPTION = "EXCEPTION"
+    YIELD = "YIELD"
 
 class OP(str, Enum):
     EQ="EQ"; NE="NE"; GT="GT"; LT="LT"; GE="GE"; LE="LE"
@@ -63,6 +64,7 @@ class Loc:
     slice: Optional[SliceSpec] = None       # limit to region between anchors
     near: Optional[NearSpec] = None         # limit to neighborhood of anchor (statement distance)
     anchor: Optional[AnchorSpec] = None     # select relative to anchor
+    line: Optional[LineSpec] = None         # filter by source line number
 
     def __post_init__(self):
         occ = self.occurrence
