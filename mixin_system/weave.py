@@ -14,8 +14,8 @@ def build_injector_map(module_name: str) -> Dict[Tuple[str,str,str,str], List[Ca
     """
     out: Dict[Tuple[str,str,str,str], List[Callable]] = {}
 
-    for (target, method), specs in list(REGISTRY._injectors.items()):  # demo: internal access
-        if not target.startswith(module_name + "."):
+    for (target, method), specs in REGISTRY.iter_injectors():  # type: ignore[attr-defined]
+        if not (target == module_name or target.startswith(module_name + ".")):
             continue
         for spec in specs:
             canon_name = spec.at.name if spec.at.name is not None else spec.at.type.value

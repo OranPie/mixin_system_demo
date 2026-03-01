@@ -109,6 +109,13 @@ def _mk_if_value_set_assign(ci_name: str, var_name: str) -> ast.If:
         orelse=[]
     )
 
+def _mk_if_value_set_return(ci_name: str) -> ast.If:
+    return ast.If(
+        test=ast.Attribute(value=ast.Name(id=ci_name, ctx=ast.Load()), attr="value_set", ctx=ast.Load()),
+        body=[ast.Return(value=ast.Attribute(value=ast.Name(id=ci_name, ctx=ast.Load()), attr="new_value", ctx=ast.Load()))],
+        orelse=[]
+    )
+
 class HeadHandler:
     type = TYPE.HEAD
 
@@ -229,7 +236,8 @@ class TailHandler:
                 cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
                 dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords)
                 guard = _mk_if_cancel_return(ci_name)
-                return ast.If(test=ast.Constant(value=True), body=[ci_assign, dispatch, guard, node], orelse=[])
+                value_set_guard = _mk_if_value_set_return(ci_name)
+                return ast.If(test=ast.Constant(value=True), body=[ci_assign, dispatch, guard, value_set_guard, node], orelse=[])
 
         fn.body = [RewriteReturns().visit(s) for s in fn.body]
 
@@ -251,7 +259,8 @@ class TailHandler:
         cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
         dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords)
         guard = _mk_if_cancel_return(ci_name)
-        fn.body.extend([ci_assign, dispatch, guard])
+        value_set_guard = _mk_if_value_set_return(ci_name)
+        fn.body.extend([ci_assign, dispatch, guard, value_set_guard])
 
 class ConstHandler:
     type = TYPE.CONST
@@ -530,6 +539,63 @@ class AttributeHandler:
 
         fn.body = [Rewriter().visit(s) for s in fn.body]
 
+class ExceptionHandler:
+    type = TYPE.EXCEPTION
+
+    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+        # One match representing the whole function body.
+        return [Match(node=fn, parent=None, field="body", index=0, at=at)]
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        method = fn.name
+        at_name = "EXCEPTION"
+        self_expr = _self_expr(fn)
+        inj = _get_injectors_call(target, method, "EXCEPTION", at_name)
+        ci_name = "_mixin_ci_exc"
+
+        # Build the except handler:
+        #   _mixin_ci_exc = CallbackInfo(...)
+        #   _mixin_ci_exc._ctx = {"exception": _mixin_exc, ...}
+        #   dispatch_injectors(injectors, _mixin_ci_exc, ctx, self)
+        #   if _mixin_ci_exc.is_cancelled: return _mixin_ci_exc.result
+        #   raise
+        exc_var = "_mixin_exc"
+        ci_assign = ast.Assign(
+            targets=[ast.Name(id=ci_name, ctx=ast.Store())],
+            value=_mk_ci_ctor("EXCEPTION", target, method, at_name),
+        )
+        ctx = ast.Dict(
+            keys=[ast.Constant("self"), ast.Constant("args"), ast.Constant("kwargs"),
+                  ast.Constant("locals"), ast.Constant("exception")],
+            values=[
+                self_expr,
+                _build_args_list_expr(fn),
+                _build_kwargs_dict_expr(fn),
+                ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]),
+                ast.Name(id=exc_var, ctx=ast.Load()),
+            ],
+        )
+        # EXCEPTION callbacks receive only self (like CONST); exception is in ci.get_context()["exception"]
+        cb_args = [self_expr]
+        dispatch = _mk_dispatch_stmt(inj, ci_name, ctx, cb_args)
+        guard = _mk_if_cancel_return(ci_name)
+        reraise = ast.Raise()  # bare `raise` re-raises current exception
+
+        except_handler = ast.ExceptHandler(
+            type=None,  # catches BaseException
+            name=exc_var,
+            body=[ci_assign, dispatch, guard, reraise],
+        )
+        try_node = ast.Try(
+            body=list(fn.body),
+            handlers=[except_handler],
+            orelse=[],
+            finalbody=[],
+        )
+        fn.body = [try_node]
+
 def install_builtin_handlers():
     register_handler(HeadHandler())
     register_handler(ParameterHandler())
@@ -537,3 +603,4 @@ def install_builtin_handlers():
     register_handler(ConstHandler())
     register_handler(InvokeHandler())
     register_handler(AttributeHandler())
+    register_handler(ExceptionHandler())

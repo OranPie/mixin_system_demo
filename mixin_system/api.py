@@ -31,10 +31,12 @@ def _ensure_registration_allowed(exc: RuntimeError) -> None:
     raise exc
 
 
-def configure(*, debug: bool | None = None) -> None:
+def configure(*, debug: bool | None = None, trace: bool | None = None) -> None:
     """Set lightweight runtime options for the mixin system."""
     if debug is not None:
         os.environ["MIXIN_DEBUG"] = "True" if debug else "False"
+    if trace is not None:
+        os.environ["MIXIN_TRACE"] = "True" if trace else "False"
 
 
 def init(*, debug: bool | None = None) -> None:
@@ -45,27 +47,32 @@ def init(*, debug: bool | None = None) -> None:
     REGISTRY.freeze()
 
 
-def mixin(target: str | type, *, priority: int = 100):
-    resolved_target = target_path(target)
+def mixin(target: str | type | list, *, priority: int = 100):
+    # Support a list of targets: register the same patch class against each one.
+    if isinstance(target, list):
+        resolved_targets = [target_path(t) for t in target]
+    else:
+        resolved_targets = [target_path(target)]
     mixin_priority = int(priority)
 
     def deco(cls):
-        cls.__mixin_target__ = resolved_target
+        cls.__mixin_target__ = resolved_targets[0] if len(resolved_targets) == 1 else resolved_targets
         cls.__mixin_priority__ = mixin_priority
-        try:
-            REGISTRY.register_mixin(resolved_target, cls, priority=mixin_priority)
-        except RuntimeError as exc:
-            _ensure_registration_allowed(exc)
+        for resolved_target in resolved_targets:
+            try:
+                REGISTRY.register_mixin(resolved_target, cls, priority=mixin_priority)
+            except RuntimeError as exc:
+                _ensure_registration_allowed(exc)
 
-        # scan methods for inject metadata (populated by @inject)
-        for _, attr in cls.__dict__.items():
-            spec = getattr(attr, "__inject_spec__", None)
-            if spec:
-                resolved = replace(spec, mixin_cls=cls, mixin_priority=mixin_priority)
-                try:
-                    REGISTRY.register_injector(resolved_target, resolved)
-                except RuntimeError as exc:
-                    _ensure_registration_allowed(exc)
+            # scan methods for inject metadata (populated by @inject)
+            for _, attr in cls.__dict__.items():
+                spec = getattr(attr, "__inject_spec__", None)
+                if spec:
+                    resolved = replace(spec, mixin_cls=cls, mixin_priority=mixin_priority)
+                    try:
+                        REGISTRY.register_injector(resolved_target, resolved)
+                    except RuntimeError as exc:
+                        _ensure_registration_allowed(exc)
         return cls
 
     return deco
@@ -126,6 +133,10 @@ def at_invoke(name: str, *, selector: Any = None, location: Loc | None = None) -
 
 def at_attribute(name: str, *, location: Loc | None = None) -> At:
     return At(type=TYPE.ATTRIBUTE, name=name, location=location)
+
+
+def at_exception(*, location: Loc | None = None) -> At:
+    return At(type=TYPE.EXCEPTION, name=None, location=location)
 
 
 def inject_head(
@@ -226,6 +237,25 @@ def inject_attribute(
     return inject(
         method=method,
         at=at_attribute(name=name, location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+def inject_exception(
+    method: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    return inject(
+        method=method,
+        at=at_exception(location=location),
         priority=priority,
         require=require,
         expect=expect,

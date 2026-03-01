@@ -54,3 +54,27 @@ def test_registration_index_breaks_ties_stably_for_same_mixin_and_priority():
 
     ordered = registry.get_injectors("pkg.Target", "tick")
     assert [s.registration_index for s in ordered] == sorted(s.registration_index for s in ordered)
+
+
+def test_mixin_list_target_registers_against_all_targets():
+    from mixin_system.api import mixin, inject
+    from mixin_system.model import At, TYPE
+    from mixin_system.registry import Registry
+    import mixin_system.api as api_mod
+
+    # Use a fresh Registry to avoid polluting global state
+    original = api_mod.REGISTRY
+    fresh = Registry()
+    api_mod.REGISTRY = fresh
+    try:
+        @mixin(target=["pkg.A", "pkg.B"])
+        class MultiPatch:
+            @inject(method="tick", at=At(type=TYPE.HEAD, name=None))
+            def on_tick(self, ci):
+                pass
+
+        assert fresh.get_injectors("pkg.A", "tick")
+        assert fresh.get_injectors("pkg.B", "tick")
+        assert not fresh.get_injectors("pkg.C", "tick")
+    finally:
+        api_mod.REGISTRY = original

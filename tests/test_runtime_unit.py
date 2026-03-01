@@ -37,6 +37,15 @@ def test_eval_when_handles_composed_boolean_expressions():
     assert _eval_when(cond, ctx)
 
 
+def test_eval_when_len_operators():
+    ctx = {"args": [1, 2, 3], "tags": ["a"]}
+    assert _eval_when(When("args", OP.LEN_EQ, 3), ctx)
+    assert _eval_when(When("args", OP.LEN_GT, 2), ctx)
+    assert _eval_when(When("args", OP.LEN_LT, 5), ctx)
+    assert not _eval_when(When("args", OP.LEN_EQ, 2), ctx)
+    assert not _eval_when(When("tags", OP.LEN_GT, 2), ctx)
+
+
 def test_merge_kwargs_raises_on_duplicate_keys():
     with pytest.raises(TypeError, match="multiple values for keyword argument 'scale'"):
         merge_kwargs({"scale": 2}, {"scale": 3})
@@ -155,3 +164,17 @@ def test_eval_invoke_updated_args_flow_to_later_injectors():
 
     assert result == 30
     assert seen_second == [(10, 20)]
+
+def test_dispatch_injectors_trace_mode_logs_to_stderr(capsys, monkeypatch):
+    monkeypatch.setenv("MIXIN_TRACE", "True")
+
+    def cb(self_obj, ci, value):
+        ci.cancel(result=42)
+
+    ci = CallbackInfo(type=TYPE.HEAD, target="pkg.Player", method="update", at_name="HEAD", trace_id="t99")
+    dispatch_injectors([cb], ci, {}, object(), 5)
+
+    captured = capsys.readouterr()
+    assert "[mixin trace]" in captured.err
+    assert "pkg.Player.update" in captured.err
+    assert "cancelled" in captured.err

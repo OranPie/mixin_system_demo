@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
+import os
 import time
 from .model import TYPE, When, OP
 
@@ -38,6 +39,10 @@ class CallbackInfo:
     def set_value(self, new_val: Any) -> None:
         self._value_set = True
         self._new_value = new_val
+
+    def set_return_value(self, new_val: Any) -> None:
+        """Mutate the return value without cancelling subsequent injectors."""
+        self.set_value(new_val)
 
     def get_value(self) -> Any:
         if self._ctx and "value" in self._ctx:
@@ -129,6 +134,9 @@ def _eval_when(cond: Optional[When], ctx: Dict[str, Any]) -> bool:
     if op == OP.MATCH:
         import re
         return re.search(str(right), str(left_val)) is not None
+    if op == OP.LEN_EQ: return len(left_val) == right
+    if op == OP.LEN_GT: return len(left_val) > right
+    if op == OP.LEN_LT: return len(left_val) < right
     raise ValueError(f"Unsupported OP: {op}")
 
 def _resolve_path(ctx: Dict[str, Any], path: str) -> Any:
@@ -196,6 +204,8 @@ def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[st
     ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=rest, kwargs=dict(cb_kwargs))
     ci._ctx = ctx2
 
+    _trace = os.getenv("MIXIN_TRACE") == "True"
+
     for cb in injectors:
         args_for_cb = list(rest)
         kwargs_for_cb = dict(cb_kwargs)
@@ -207,8 +217,19 @@ def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[st
             ci._ctx["call_args"] = list(args_for_cb)
             ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
 
+        if _trace:
+            import sys
+            print(
+                f"[mixin trace] {ci.target}.{ci.method} [{ci.type.value}:{ci.at_name}]"
+                f" cb={getattr(cb, '__qualname__', cb)} trace_id={ci.trace_id}",
+                file=sys.stderr,
+            )
+
         cb(self_obj, ci, *args_for_cb, **kwargs_for_cb)
         if ci.is_cancelled:
+            if _trace:
+                import sys
+                print(f"[mixin trace]   -> cancelled, result={ci.result!r}", file=sys.stderr)
             return ci.result
     return None
 

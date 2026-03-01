@@ -51,6 +51,10 @@ class Registry:
     def get_injectors(self, target: str, method: str) -> List[InjectorSpec]:
         return list(self._injectors.get((target, method), []))
 
+    def iter_injectors(self):
+        """Yield ((target, method), specs) for all registered injectors."""
+        yield from self._injectors.items()
+
     def freeze(self) -> None:
         self._frozen = True
 

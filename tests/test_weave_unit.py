@@ -1,9 +1,16 @@
-from types import SimpleNamespace
-
 from mixin_system.model import At, Loc, OP, TYPE, When
 from mixin_system.registry import InjectorSpec
 from mixin_system.runtime import CallbackInfo
 from mixin_system.weave import build_injector_map
+
+
+def _fake_registry(injectors_dict):
+    class FakeRegistry:
+        def __init__(self, d):
+            self._injectors = d
+        def iter_injectors(self):
+            yield from self._injectors.items()
+    return FakeRegistry(injectors_dict)
 
 
 def test_build_injector_map_filters_to_requested_module(monkeypatch):
@@ -12,12 +19,13 @@ def test_build_injector_map_filters_to_requested_module(monkeypatch):
 
     at = At(type=TYPE.HEAD, name=None)
     spec = InjectorSpec(mixin_cls=object, callback=cb, method="tick", at=at)
-    fake_registry = SimpleNamespace(
-        _injectors={
-            ("demo_game.player.Player", "tick"): [spec],
-            ("other_game.player.Player", "tick"): [spec],
-        }
-    )
+    at_param = At(type=TYPE.PARAMETER, name="x")
+    spec_mod = InjectorSpec(mixin_cls=object, callback=cb, method="compute", at=at_param)
+    fake_registry = _fake_registry({
+        ("demo_game.player.Player", "tick"): [spec],
+        ("other_game.player.Player", "tick"): [spec],
+        ("demo_game.utils", "compute"): [spec_mod],  # module-level function target
+    })
 
     monkeypatch.setattr("mixin_system.weave.REGISTRY", fake_registry)
 
@@ -25,6 +33,8 @@ def test_build_injector_map_filters_to_requested_module(monkeypatch):
 
     assert ("demo_game.player.Player", "tick", "HEAD", "HEAD") in inj_map
     assert ("other_game.player.Player", "tick", "HEAD", "HEAD") not in inj_map
+    # module-level target (target == module_name) must be included
+    assert ("demo_game.utils", "compute", "PARAMETER", "x") in inj_map
 
 
 def test_build_injector_map_wraps_condition_and_preserves_callback_name(monkeypatch):
@@ -35,7 +45,7 @@ def test_build_injector_map_wraps_condition_and_preserves_callback_name(monkeypa
 
     at = At(type=TYPE.PARAMETER, name="value", location=Loc(condition=When("value", OP.GT, 0)))
     spec = InjectorSpec(mixin_cls=object, callback=conditional_cb, method="set_value", at=at)
-    fake_registry = SimpleNamespace(_injectors={("demo_game.player.Player", "set_value"): [spec]})
+    fake_registry = _fake_registry({("demo_game.player.Player", "set_value"): [spec]})
 
     monkeypatch.setattr("mixin_system.weave.REGISTRY", fake_registry)
 

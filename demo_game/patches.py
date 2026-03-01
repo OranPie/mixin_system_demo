@@ -2,7 +2,8 @@ import mixin_system
 from mixin_system import (
     mixin, inject, At, TYPE, OP, Loc, When, OCCURRENCE,
     CallSelector, QualifiedSelector, ArgAny, ArgConst,
-    SliceSpec, AnchorSpec, NearSpec, KwPattern, STARSTAR_POLICY
+    SliceSpec, AnchorSpec, NearSpec, KwPattern, STARSTAR_POLICY,
+    at_exception,
 )
 
 @mixin(target="demo_game.game.player.player.Player")
@@ -158,3 +159,31 @@ class PlayerCombatPatch:
     @inject(method="do_nothing", at=At(type=TYPE.TAIL, name=None))
     def override_implicit_return(self, ci, *args, **kw):
         ci.cancel(result=123)
+
+    @inject(method="async_speed", at=At(type=TYPE.CONST, name=1.0))
+    def buff_async_base_speed(self, ci):
+        ci.set_value(2.5)
+
+    @inject(method="score", at=At(type=TYPE.TAIL, name=None), priority=10)
+    def double_score(self, ci, *args, **kw):
+        ci.set_return_value(ci.get_context().get("return_value", 0) * 2)
+
+    @inject(method="score", at=At(type=TYPE.TAIL, name=None), priority=20)
+    def add_bonus(self, ci, *args, **kw):
+        # runs after double_score because priority=20 > 10; set_return_value lets this run
+        current = ci.new_value if ci.value_set else ci.get_context().get("return_value", 0)
+        ci.set_return_value(current + 1)
+
+    @inject(method="risky_divide", at=at_exception())
+    def handle_divide_error(self, ci):
+        exc = ci.get_context().get("exception")
+        if isinstance(exc, ZeroDivisionError):
+            ci.cancel(result=-1)
+
+
+@mixin(target="demo_game.utils")
+class UtilsPatch:
+    @inject(method="compute_bonus", at=At(type=TYPE.PARAMETER, name="multiplier"))
+    def clamp_multiplier(self, ci, *args, **kw):
+        if ci.get_context().get("value", 0) > 10:
+            ci.set_value(10.0)

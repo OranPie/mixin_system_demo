@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ast
+import warnings
 from typing import Any, Dict, List, Tuple, Optional
 from .model import TYPE, At, POLICY
 from .registry import REGISTRY, InjectorSpec
@@ -24,7 +25,7 @@ class MixinTransformer(ast.NodeTransformer):
         raise TypeError(f"Injector policy must be POLICY enum, got {type(pol).__name__}")
 
     def _warn(self, msg: str) -> None:
-        print(f"[mixin warn] {msg}")
+        warnings.warn(msg, stacklevel=2)
 
     def _handle_count_mismatch(self, *, kind: str, spec: InjectorSpec, matched: int, expected: int, target: str, method: str) -> None:
         pol = self._policy(spec)
@@ -33,53 +34,73 @@ class MixinTransformer(ast.NodeTransformer):
             f"matched {matched} != {kind} {expected}"
         )
         if kind == "require":
-            if pol in (POLICY.ERROR, POLICY.STRICT):
+            # Policy hierarchy for require:
+            #   STRICT / ERROR → raise MixinMatchError
+            #   WARN           → emit warning
+            #   IGNORE         → silent
+            if pol in (POLICY.STRICT, POLICY.ERROR):
                 raise MixinMatchError(msg)
             if pol == POLICY.WARN:
                 self._warn(msg)
             return
 
         # kind == "expect"
+        # Policy hierarchy for expect:
+        #   STRICT → raise MixinMatchError (stricter than ERROR)
+        #   ERROR / WARN → emit warning
+        #   IGNORE → silent
         if pol == POLICY.STRICT:
             raise MixinMatchError(msg)
         if pol in (POLICY.ERROR, POLICY.WARN):
             self._warn(msg)
 
+    def _instrument_method(self, item: ast.FunctionDef, target: str) -> None:
+        """Apply all registered injectors to a single method node (FunctionDef or AsyncFunctionDef)."""
+        injectors = REGISTRY.get_injectors(target, item.name)
+        if not injectors:
+            return
+        # Group by At (type+name+selector+location) for batching
+        by_at: Dict[At, List[InjectorSpec]] = {}
+        for spec in injectors:
+            by_at.setdefault(spec.at, []).append(spec)
+        for at, specs in by_at.items():
+            handler = get_handler(at.type)
+            matches = apply_location(item, handler.find(item, at), at)
+            # enforce require/expect for each spec (simple: same match count)
+            for spec in specs:
+                if spec.require is not None and len(matches) != spec.require:
+                    self._handle_count_mismatch(
+                        kind="require",
+                        spec=spec,
+                        matched=len(matches),
+                        expected=spec.require,
+                        target=target,
+                        method=item.name,
+                    )
+                if spec.expect is not None and len(matches) != spec.expect:
+                    self._handle_count_mismatch(
+                        kind="expect",
+                        spec=spec,
+                        matched=len(matches),
+                        expected=spec.expect,
+                        target=target,
+                        method=item.name,
+                    )
+            handler.instrument(item, matches, specs, target)
+
     def visit_ClassDef(self, node: ast.ClassDef):
         # Determine fully qualified target for this class: module.ClassName
         target = f"{self.module_name}.{node.name}"
-        # Apply injectors per method
+        # Apply injectors per method (sync and async)
         for item in node.body:
-            if isinstance(item, ast.FunctionDef):
-                injectors = REGISTRY.get_injectors(target, item.name)
-                if not injectors:
-                    continue
-                # Group by At (type+name+selector+location) for batching
-                by_at: Dict[At, List[InjectorSpec]] = {}
-                for spec in injectors:
-                    by_at.setdefault(spec.at, []).append(spec)
-                for at, specs in by_at.items():
-                    handler = get_handler(at.type)
-                    matches = apply_location(item, handler.find(item, at), at)
-                    # enforce require/expect for each spec (simple: same match count)
-                    for spec in specs:
-                        if spec.require is not None and len(matches) != spec.require:
-                            self._handle_count_mismatch(
-                                kind="require",
-                                spec=spec,
-                                matched=len(matches),
-                                expected=spec.require,
-                                target=target,
-                                method=item.name,
-                            )
-                        if spec.expect is not None and len(matches) != spec.expect:
-                            self._handle_count_mismatch(
-                                kind="expect",
-                                spec=spec,
-                                matched=len(matches),
-                                expected=spec.expect,
-                                target=target,
-                                method=item.name,
-                            )
-                    handler.instrument(item, matches, specs, target)
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._instrument_method(item, target)
+        return node
+
+    def visit_Module(self, node: ast.Module):
+        # Instrument module-level functions; target = module name itself.
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._instrument_method(item, self.module_name)
+        self.generic_visit(node)
         return node

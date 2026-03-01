@@ -61,3 +61,27 @@ def test_head_ctx_sees_kwargs_for_kwarg_signature():
 def test_tail_implicit_return_override():
     p = Player(10)
     assert p.do_nothing() == 123
+
+def test_async_method_const_injection():
+    import asyncio
+    from demo_game.game.player.player import Player
+    p = Player(10)
+    result = asyncio.run(p.async_speed())
+    assert result == 5.0  # 2.5 * 2
+
+def test_tail_set_return_value_chains_multiple_injectors():
+    from demo_game.game.player.player import Player
+    p = Player(5)
+    # health=5 -> score()=50 -> double_score sets 100 -> add_bonus sets 101
+    assert p.score() == 101
+
+def test_exception_injection_suppresses_zero_division():
+    from demo_game.game.player.player import Player
+    p = Player(10)
+    assert p.risky_divide(2) == 5.0        # normal path unchanged
+    assert p.risky_divide(0) == -1          # ZeroDivisionError suppressed, returns -1
+
+def test_module_level_function_injection():
+    from demo_game.utils import compute_bonus
+    assert compute_bonus(10, 2.0) == 20.0       # multiplier within range, unchanged
+    assert compute_bonus(10, 15.0) == 100.0      # multiplier clamped to 10

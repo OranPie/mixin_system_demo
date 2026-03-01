@@ -64,3 +64,13 @@ class Player:
     def do_nothing(self):
         x = 1
         x += 1
+
+    async def async_speed(self) -> float:
+        base = 1.0
+        return base * 2
+
+    def score(self) -> int:
+        return self.health * 10
+
+    def risky_divide(self, divisor: int) -> float:
+        return self.health / divisor

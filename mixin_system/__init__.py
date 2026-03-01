@@ -9,6 +9,7 @@ from .api import (
     inject,
     inject_attribute,
     inject_const,
+    inject_exception,
     inject_head,
     inject_invoke,
     inject_parameter,
@@ -16,6 +17,7 @@ from .api import (
     mixin,
     at_attribute,
     at_const,
+    at_exception,
     at_head,
     at_invoke,
     at_parameter,
@@ -34,8 +36,8 @@ from .location import SliceSpec, NearSpec, AnchorSpec
 
 __all__ = [
     "configure","init","mixin","inject","target_path",
-    "at_head","at_tail","at_parameter","at_const","at_invoke","at_attribute",
-    "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute",
+    "at_head","at_tail","at_parameter","at_const","at_invoke","at_attribute","at_exception",
+    "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute","inject_exception",
     "At","TYPE","OP","POLICY","OCCURRENCE","Loc","When",
     "NameSelector","QualifiedSelector","ConstSelector","AttrSelector",
     "CallSelector","ArgAny","ArgConst","ArgName","ArgAttr","KwPattern",

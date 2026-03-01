@@ -13,6 +13,7 @@ class TYPE(str, Enum):
     CONST = "CONST"
     ATTRIBUTE = "ATTRIBUTE"
     PARAMETER = "PARAMETER"
+    EXCEPTION = "EXCEPTION"
 
 class OP(str, Enum):
     EQ="EQ"; NE="NE"; GT="GT"; LT="LT"; GE="GE"; LE="LE"
@@ -21,6 +22,7 @@ class OP(str, Enum):
     MATCH="MATCH"
     AND="AND"; OR="OR"; NOT="NOT"
     ISINSTANCE="ISINSTANCE"
+    LEN_EQ="LEN_EQ"; LEN_GT="LEN_GT"; LEN_LT="LEN_LT"
 
 class POLICY(str, Enum):
     ERROR = "ERROR"
