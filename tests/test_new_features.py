@@ -88,7 +88,7 @@ def test_line_targeting_replaces_only_matching_line():
 # ---------------------------------------------------------------------------
 
 def test_yield_injection_modifies_generated_values():
-    """PlayerYieldPatch doubles every yielded value (* 10)."""
+    """PlayerYieldPatch multiplies every yielded value by 10."""
     from demo_game.game.player.player import Player
 
     p = Player(5)

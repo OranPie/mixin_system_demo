@@ -166,16 +166,8 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
                 pick = (-a.offset) - 1
             matches_sorted = [cand[pick][1]] if 0 <= pick < len(cand) else []
 
-    occ = loc.occurrence
-    if occ == OCCURRENCE.FIRST:
-        matches_sorted = matches_sorted[:1]
-    elif occ == OCCURRENCE.LAST:
-        matches_sorted = matches_sorted[-1:] if matches_sorted else []
-
-    if loc.ordinal is not None:
-        matches_sorted = [matches_sorted[loc.ordinal]] if 0 <= loc.ordinal < len(matches_sorted) else []
-
-    # line-number filter (applied last, before ordinal/occurrence so ordering is consistent)
+    # line-number filter: applied before occurrence/ordinal so those selectors
+    # pick from the line-restricted candidate set.
     if loc.line:
         ln: LineSpec = loc.line
 
@@ -188,5 +180,14 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
             return ln.lineno <= node_lineno <= ln.end_lineno
 
         matches_sorted = [m for m in matches_sorted if _in_line(m)]
+
+    occ = loc.occurrence
+    if occ == OCCURRENCE.FIRST:
+        matches_sorted = matches_sorted[:1]
+    elif occ == OCCURRENCE.LAST:
+        matches_sorted = matches_sorted[-1:] if matches_sorted else []
+
+    if loc.ordinal is not None:
+        matches_sorted = [matches_sorted[loc.ordinal]] if 0 <= loc.ordinal < len(matches_sorted) else []
 
     return matches_sorted

@@ -89,4 +89,8 @@ class Registry:
         """Allow mutations again (e.g. for hot-reloading)."""
         self._frozen = False
 
+    def is_frozen(self) -> bool:
+        """Return True if the registry is currently frozen."""
+        return self._frozen
+
 REGISTRY = Registry()
