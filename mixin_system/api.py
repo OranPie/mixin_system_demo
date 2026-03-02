@@ -31,12 +31,28 @@ def _ensure_registration_allowed(exc: RuntimeError) -> None:
     raise exc
 
 
-def configure(*, debug: bool | None = None, trace: bool | None = None) -> None:
-    """Set lightweight runtime options for the mixin system."""
+def configure(*, debug: bool | None = None, trace: bool | None = None, source_dump_dir: str | None = None) -> None:
+    """Set lightweight runtime options for the mixin system.
+
+    Parameters
+    ----------
+    debug:
+        When ``True`` sets ``MIXIN_DEBUG=True`` which causes each weaved module
+        to be written as human-readable Python source to *source_dump_dir*
+        (default ``.weaved/``).
+    trace:
+        When ``True`` enables per-injector trace logging to ``stderr``.
+    source_dump_dir:
+        Directory for source ejection output.  Defaults to ``.weaved/`` when
+        debug is enabled.  Pass an empty string to reset to the default.
+    """
     if debug is not None:
         os.environ["MIXIN_DEBUG"] = "True" if debug else "False"
     if trace is not None:
         os.environ["MIXIN_TRACE"] = "True" if trace else "False"
+    if source_dump_dir is not None:
+        from .debug import set_dump_dir
+        set_dump_dir(source_dump_dir if source_dump_dir else None)
 
 
 def init(*, debug: bool | None = None) -> None:
@@ -64,13 +80,20 @@ def mixin(target: str | type | list, *, priority: int = 100):
             except RuntimeError as exc:
                 _ensure_registration_allowed(exc)
 
-            # scan methods for inject metadata (populated by @inject)
-            for _, attr in cls.__dict__.items():
+            # scan methods: @inject-decorated ones become injector callbacks;
+            # plain (non-dunder) methods are injected as new class members.
+            for attr_name, attr in cls.__dict__.items():
                 spec = getattr(attr, "__inject_spec__", None)
                 if spec:
                     resolved = replace(spec, mixin_cls=cls, mixin_priority=mixin_priority)
                     try:
                         REGISTRY.register_injector(resolved_target, resolved)
+                    except RuntimeError as exc:
+                        _ensure_registration_allowed(exc)
+                elif not attr_name.startswith("_") and callable(attr):
+                    # Structural injection: add the plain method to the target class.
+                    try:
+                        REGISTRY.register_class_member(resolved_target, attr_name, attr)
                     except RuntimeError as exc:
                         _ensure_registration_allowed(exc)
         return cls
@@ -137,6 +160,11 @@ def at_attribute(name: str, *, location: Loc | None = None) -> At:
 
 def at_exception(*, location: Loc | None = None) -> At:
     return At(type=TYPE.EXCEPTION, name=None, location=location)
+
+
+def at_yield(*, location: Loc | None = None) -> At:
+    """Return an :class:`~mixin_system.At` descriptor for YIELD injection points."""
+    return At(type=TYPE.YIELD, name=None, location=location)
 
 
 def inject_head(
@@ -261,3 +289,109 @@ def inject_exception(
         expect=expect,
         policy=policy,
     )
+
+
+def inject_yield(
+    method: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_yield(...)``."""
+    return inject(
+        method=method,
+        at=at_yield(location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hot-reloading / Dynamic Unpatching
+# ---------------------------------------------------------------------------
+
+def unregister_injector(target: str, method: str, callback: Callable) -> bool:
+    """Remove *callback* from the live injector registry.
+
+    Temporarily unfreezes the registry, removes the callback, and refreezes.
+    Returns ``True`` if anything was removed.
+
+    Call :func:`reload_target` afterwards to re-import the target module with
+    the updated injector set.
+    """
+    was_frozen = REGISTRY.is_frozen()
+    REGISTRY.unfreeze()
+    try:
+        return REGISTRY.unregister_injector(target, method, callback)
+    finally:
+        if was_frozen:
+            REGISTRY.freeze()
+
+
+def reload_target(module_name: str) -> None:
+    """Force the target module to be re-imported through the mixin import hook.
+
+    This re-weaves the module's AST against the current registry state,
+    picking up any changes made by :func:`unregister_injector`.
+    """
+    import importlib
+    import sys
+
+    mod = sys.modules.get(module_name)
+    if mod is None:
+        raise ValueError(f"Module {module_name!r} is not currently loaded.")
+    # Remove from sys.modules so the next import goes through MixinLoader.
+    sys.modules.pop(module_name)
+    importlib.import_module(module_name)
+
+
+# ---------------------------------------------------------------------------
+# Type-stub generation
+# ---------------------------------------------------------------------------
+
+def generate_stubs(output_dir: str = ".") -> None:
+    """Generate ``.pyi`` stub files that expose injected hooks for IDE support.
+
+    For each target module a single stub file is written to *output_dir*
+    containing a ``# mixin-injected`` comment for every registered injector,
+    making it discoverable by static analysis tools.
+    """
+    import pathlib
+    import textwrap
+
+    out_path = pathlib.Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # Group injectors by their target module
+    by_module: dict[str, list[tuple[str, str, object]]] = {}
+    for (target, method), specs in REGISTRY.iter_injectors():
+        # Derive module path: everything before the last component (class name)
+        # or the target itself for module-level targets.
+        parts = target.rsplit(".", 1)
+        module_part = parts[0] if len(parts) > 1 else target
+        for spec in specs:
+            by_module.setdefault(module_part, []).append((target, method, spec))
+
+    for module, entries in by_module.items():
+        stub_file = out_path / f"{module.replace('.', '_')}.pyi"
+        lines = [
+            f"# Auto-generated stub for mixin injectors targeting {module}\n",
+            "# Do not edit – regenerate with mixin_system.generate_stubs()\n",
+            "from typing import Any\n\n",
+        ]
+        seen_classes: set[str] = set()
+        for target, method, spec in entries:
+            cls_name = target.split(".")[-1] if "." in target else None
+            cb_name = getattr(spec.callback, "__qualname__", str(spec.callback))
+            comment = f"# mixin-injected [{spec.at.type.value}] by {cb_name}"
+            if cls_name and cls_name not in seen_classes:
+                lines.append(f"class {cls_name}:\n")
+                seen_classes.add(cls_name)
+            indent = "    " if cls_name else ""
+            lines.append(f"{indent}def {method}(self, *args: Any, **kwargs: Any) -> Any: ...  {comment}\n")
+        stub_file.write_text("".join(lines), encoding="utf-8")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
+import asyncio
 import os
 import time
 from .model import TYPE, When, OP
@@ -233,6 +234,49 @@ def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[st
             return ci.result
     return None
 
+
+async def async_dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[str, Any], *cb_args, **cb_kwargs):
+    """Async variant of :func:`dispatch_injectors`.
+
+    Awaits callbacks that return coroutines, enabling ``async def`` callbacks
+    inside ``async def`` target methods.
+    """
+    self_obj = cb_args[0] if cb_args else None
+    rest = list(cb_args[1:]) if len(cb_args) > 1 else []
+    ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=rest, kwargs=dict(cb_kwargs))
+    ci._ctx = ctx2
+
+    _trace = os.getenv("MIXIN_TRACE") == "True"
+
+    for cb in injectors:
+        args_for_cb = list(rest)
+        kwargs_for_cb = dict(cb_kwargs)
+        if ci.type == TYPE.INVOKE and ci._call_args is not None and ci._call_kwargs is not None:
+            args_for_cb = list(ci._call_args)
+            kwargs_for_cb = dict(ci._call_kwargs)
+            ci._ctx["args"] = list(args_for_cb)
+            ci._ctx["kwargs"] = dict(kwargs_for_cb)
+            ci._ctx["call_args"] = list(args_for_cb)
+            ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
+
+        if _trace:
+            import sys
+            print(
+                f"[mixin trace] {ci.target}.{ci.method} [{ci.type.value}:{ci.at_name}]"
+                f" cb={getattr(cb, '__qualname__', cb)} trace_id={ci.trace_id}",
+                file=sys.stderr,
+            )
+
+        result = cb(self_obj, ci, *args_for_cb, **kwargs_for_cb)
+        if asyncio.iscoroutine(result):
+            await result
+        if ci.is_cancelled:
+            if _trace:
+                import sys
+                print(f"[mixin trace]   -> cancelled, result={ci.result!r}", file=sys.stderr)
+            return ci.result
+    return None
+
 # ---------------- Expression-level helpers ----------------
 
 def eval_const(inj_map, target: str, method: str, at_name: str, self_obj, const_value):
@@ -273,3 +317,25 @@ def eval_attr_write(inj_map, target: str, method: str, at_name: str, self_obj, n
     if ci.value_set:
         return ci.new_value
     return new_value
+
+
+def eval_yield(inj_map, target: str, method: str, at_name: str, self_obj, yield_value):
+    """Runtime helper for YIELD injection points.
+
+    Replaces the yielded value after running callbacks; callbacks use
+    ``ci.set_value(x)`` to mutate the value or ``ci.cancel(result=x)`` to
+    substitute an entirely different value (the generator will yield that
+    instead).
+    """
+    key = (target, method, "YIELD", str(at_name))
+    injectors = inj_map.get(key, [])
+    if not injectors:
+        return yield_value
+    ci = CallbackInfo(type=TYPE.YIELD, target=target, method=method, at_name=str(at_name), trace_id=str(time.time_ns()))
+    ctx = {"value": yield_value, "yield_value": yield_value}
+    dispatch_injectors(injectors, ci, ctx, self_obj, yield_value)
+    if ci.is_cancelled:
+        return ci.result
+    if ci.value_set:
+        return ci.new_value
+    return yield_value

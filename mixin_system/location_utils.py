@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .model import At, Loc, OCCURRENCE
 from .handlers import get_handler
-from .location import SliceSpec, NearSpec, AnchorSpec
+from .location import SliceSpec, NearSpec, AnchorSpec, LineSpec
 
 def _dotted_name_from_attribute(n: ast.AST):
     if isinstance(n, ast.Name):
@@ -165,6 +165,21 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
                 cand = list(reversed(cand))
                 pick = (-a.offset) - 1
             matches_sorted = [cand[pick][1]] if 0 <= pick < len(cand) else []
+
+    # line-number filter: applied before occurrence/ordinal so those selectors
+    # pick from the line-restricted candidate set.
+    if loc.line:
+        ln: LineSpec = loc.line
+
+        def _in_line(m) -> bool:
+            node_lineno = getattr(m.node, "lineno", None)
+            if node_lineno is None:
+                return False
+            if ln.end_lineno is None:
+                return node_lineno == ln.lineno
+            return ln.lineno <= node_lineno <= ln.end_lineno
+
+        matches_sorted = [m for m in matches_sorted if _in_line(m)]
 
     occ = loc.occurrence
     if occ == OCCURRENCE.FIRST:

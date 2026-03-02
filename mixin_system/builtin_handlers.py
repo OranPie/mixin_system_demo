@@ -87,12 +87,16 @@ def _mk_ci_ctor(type_member: str, target: str, method: str, at_name: Any) -> ast
         ]
     )
 
-def _mk_dispatch_stmt(injectors_expr: ast.expr, ci_name: str, ctx_expr: ast.expr, cb_args: List[ast.expr], cb_keywords: Optional[List[ast.keyword]] = None) -> ast.Expr:
-    return ast.Expr(value=ast.Call(
-        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="dispatch_injectors", ctx=ast.Load()),
+def _mk_dispatch_stmt(injectors_expr: ast.expr, ci_name: str, ctx_expr: ast.expr, cb_args: List[ast.expr], cb_keywords: Optional[List[ast.keyword]] = None, *, is_async: bool = False) -> ast.Expr:
+    dispatch_attr = "async_dispatch_injectors" if is_async else "dispatch_injectors"
+    call = ast.Call(
+        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr=dispatch_attr, ctx=ast.Load()),
         args=[injectors_expr, ast.Name(id=ci_name, ctx=ast.Load()), ctx_expr, *cb_args],
         keywords=cb_keywords or []
-    ))
+    )
+    if is_async:
+        return ast.Expr(value=ast.Await(value=call))
+    return ast.Expr(value=call)
 
 def _mk_if_cancel_return(ci_name: str) -> ast.If:
     return ast.If(
@@ -125,10 +129,16 @@ class HeadHandler:
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
         if not matches:
             return
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
         method = fn.name
         at_name = "HEAD"
-        inj = _get_injectors_call(target, method, "HEAD", at_name=at_name)
+        inj_var = "_mixin_inj_head"
         ci_name = "_mixin_ci_head"
+        # Fast-path: assign injector list once, skip dispatch when empty
+        inj_assign = ast.Assign(
+            targets=[ast.Name(id=inj_var, ctx=ast.Store())],
+            value=_get_injectors_call(target, method, "HEAD", at_name=at_name),
+        )
         ci_assign = ast.Assign(targets=[ast.Name(id=ci_name, ctx=ast.Store())], value=_mk_ci_ctor("HEAD", target, method, at_name))
 
         ctx = ast.Dict(
@@ -141,11 +151,15 @@ class HeadHandler:
             ]
         )
         cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
-        dispatch = _mk_dispatch_stmt(inj, ci_name, ctx, cb_args, cb_keywords)
+        dispatch = _mk_dispatch_stmt(ast.Name(id=inj_var, ctx=ast.Load()), ci_name, ctx, cb_args, cb_keywords, is_async=is_async)
         guard = _mk_if_cancel_return(ci_name)
-        fn.body.insert(0, ci_assign)
-        fn.body.insert(1, dispatch)
-        fn.body.insert(2, guard)
+        fast_path_if = ast.If(
+            test=ast.Name(id=inj_var, ctx=ast.Load()),
+            body=[ci_assign, dispatch, guard],
+            orelse=[],
+        )
+        fn.body.insert(0, fast_path_if)
+        fn.body.insert(0, inj_assign)
 
 class ParameterHandler:
     type = TYPE.PARAMETER
@@ -161,12 +175,17 @@ class ParameterHandler:
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
         if not matches:
             return
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
         method = fn.name
 
         for m in sorted(matches, key=lambda x: x.index or 0, reverse=True):
             param_name = str(m.at.name)
-            inj = _get_injectors_call(target, method, "PARAMETER", at_name=param_name)
+            inj_var = f"_mixin_inj_param_{param_name}"
             ci_name = f"_mixin_ci_param_{param_name}"
+            inj_assign = ast.Assign(
+                targets=[ast.Name(id=inj_var, ctx=ast.Store())],
+                value=_get_injectors_call(target, method, "PARAMETER", at_name=param_name),
+            )
             ci_assign = ast.Assign(targets=[ast.Name(id=ci_name, ctx=ast.Store())], value=_mk_ci_ctor("PARAMETER", target, method, param_name))
 
             ctx = ast.Dict(
@@ -183,14 +202,17 @@ class ParameterHandler:
             )
             # pass the full function signature to injector, like HEAD/TAIL
             cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
-            dispatch = _mk_dispatch_stmt(inj, ci_name, ctx, cb_args, cb_keywords)
+            dispatch = _mk_dispatch_stmt(ast.Name(id=inj_var, ctx=ast.Load()), ci_name, ctx, cb_args, cb_keywords, is_async=is_async)
             guard = _mk_if_cancel_return(ci_name)
             maybe_set = _mk_if_value_set_assign(ci_name, param_name)
 
-            fn.body.insert(0, maybe_set)
-            fn.body.insert(0, guard)
-            fn.body.insert(0, dispatch)
-            fn.body.insert(0, ci_assign)
+            fast_path_if = ast.If(
+                test=ast.Name(id=inj_var, ctx=ast.Load()),
+                body=[ci_assign, dispatch, guard, maybe_set],
+                orelse=[],
+            )
+            fn.body.insert(0, fast_path_if)
+            fn.body.insert(0, inj_assign)
 
 class TailHandler:
     type = TYPE.TAIL
@@ -210,9 +232,15 @@ class TailHandler:
         return out
 
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
         method = fn.name
         at_name = "TAIL"
-        inj_expr = _get_injectors_call(target, method, "TAIL", at_name=at_name)
+        inj_var = "_mixin_inj_tail"
+        inj_assign = ast.Assign(
+            targets=[ast.Name(id=inj_var, ctx=ast.Store())],
+            value=_get_injectors_call(target, method, "TAIL", at_name=at_name),
+        )
+        inj_expr = ast.Name(id=inj_var, ctx=ast.Load())
         self_expr = _self_expr(fn)
 
         class RewriteReturns(ast.NodeTransformer):
@@ -234,12 +262,18 @@ class TailHandler:
                     ]
                 )
                 cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
-                dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords)
+                dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords, is_async=is_async)
                 guard = _mk_if_cancel_return(ci_name)
                 value_set_guard = _mk_if_value_set_return(ci_name)
-                return ast.If(test=ast.Constant(value=True), body=[ci_assign, dispatch, guard, value_set_guard, node], orelse=[])
+                fast_path_if = ast.If(
+                    test=inj_expr,
+                    body=[ci_assign, dispatch, guard, value_set_guard],
+                    orelse=[],
+                )
+                return ast.If(test=ast.Constant(value=True), body=[fast_path_if, node], orelse=[])
 
         fn.body = [RewriteReturns().visit(s) for s in fn.body]
+        fn.body.insert(0, inj_assign)
 
         # implicit tail at end
         ci_name = "_mixin_ci_tail_end"
@@ -257,10 +291,15 @@ class TailHandler:
             ]
         )
         cb_args, cb_keywords = _dispatch_call_args_for_fn(fn)
-        dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords)
+        dispatch = _mk_dispatch_stmt(inj_expr, ci_name, ctx, cb_args, cb_keywords, is_async=is_async)
         guard = _mk_if_cancel_return(ci_name)
         value_set_guard = _mk_if_value_set_return(ci_name)
-        fn.body.extend([ci_assign, dispatch, guard, value_set_guard])
+        fast_path_end = ast.If(
+            test=inj_expr,
+            body=[ci_assign, dispatch, guard, value_set_guard],
+            orelse=[],
+        )
+        fn.body.append(fast_path_end)
 
 class ConstHandler:
     type = TYPE.CONST
@@ -549,6 +588,7 @@ class ExceptionHandler:
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
         if not matches:
             return
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
         method = fn.name
         at_name = "EXCEPTION"
         self_expr = _self_expr(fn)
@@ -579,7 +619,7 @@ class ExceptionHandler:
         )
         # EXCEPTION callbacks receive only self (like CONST); exception is in ci.get_context()["exception"]
         cb_args = [self_expr]
-        dispatch = _mk_dispatch_stmt(inj, ci_name, ctx, cb_args)
+        dispatch = _mk_dispatch_stmt(inj, ci_name, ctx, cb_args, is_async=is_async)
         guard = _mk_if_cancel_return(ci_name)
         reraise = ast.Raise()  # bare `raise` re-raises current exception
 
@@ -596,6 +636,70 @@ class ExceptionHandler:
         )
         fn.body = [try_node]
 
+
+class YieldHandler:
+    """Intercept ``yield`` expressions in generator functions.
+
+    Callbacks receive the yielded value via ``ci.get_context()['value']`` and
+    can mutate it with ``ci.set_value(x)`` or substitute a different value
+    with ``ci.cancel(result=x)``.
+    """
+
+    type = TYPE.YIELD
+
+    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+        matches: List[Match] = []
+
+        class Finder(ast.NodeVisitor):
+            def __init__(self):
+                self.parents: List[ast.AST] = []
+
+            def generic_visit(self, node: ast.AST) -> None:
+                self.parents.append(node)
+                super().generic_visit(node)
+                self.parents.pop()
+
+            def visit_Yield(self, node: ast.Yield) -> None:  # type: ignore[override]
+                parent = self.parents[-1] if self.parents else None
+                matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
+
+        Finder().visit(fn)
+        return matches
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        at_name = "YIELD"
+        method = fn.name
+        self_expr = _self_expr(fn)
+        match_nodes = {m.node for m in matches}
+
+        class Rewriter(ast.NodeTransformer):
+            def visit_Yield(self, node: ast.Yield) -> ast.AST:  # type: ignore[override]
+                if node not in match_nodes:
+                    return node
+                yield_value = node.value if node.value is not None else ast.Constant(value=None)
+                new_value = ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()),
+                        attr="eval_yield",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
+                        ast.Constant(value=target),
+                        ast.Constant(value=method),
+                        ast.Constant(value=at_name),
+                        self_expr,
+                        yield_value,
+                    ],
+                    keywords=[],
+                )
+                return ast.Yield(value=new_value)
+
+        fn.body = [Rewriter().visit(s) for s in fn.body]
+
+
 def install_builtin_handlers():
     register_handler(HeadHandler())
     register_handler(ParameterHandler())
@@ -604,3 +708,4 @@ def install_builtin_handlers():
     register_handler(InvokeHandler())
     register_handler(AttributeHandler())
     register_handler(ExceptionHandler())
+    register_handler(YieldHandler())

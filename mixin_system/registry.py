@@ -22,6 +22,7 @@ class Registry:
         self._targets: Dict[str, List[type]] = {}
         self._target_priorities: Dict[Tuple[str, type], int] = {}
         self._injectors: Dict[Tuple[str,str], List[InjectorSpec]] = {}  # (target, method) -> injectors
+        self._class_members: Dict[str, List[Tuple[str, Any]]] = {}  # target -> [(name, obj)]
         self._frozen = False
         self._next_index = 0
 
@@ -48,6 +49,12 @@ class Registry:
         self._injectors.setdefault(key, []).append(spec)
         self._injectors[key].sort(key=self._injector_sort_key)
 
+    def register_class_member(self, target: str, name: str, obj: Any) -> None:
+        """Register a new method/property/attribute to inject into the target class at import time."""
+        if self._frozen:
+            raise RuntimeError("Registry is frozen; register class members before init() completes.")
+        self._class_members.setdefault(target, []).append((name, obj))
+
     def get_injectors(self, target: str, method: str) -> List[InjectorSpec]:
         return list(self._injectors.get((target, method), []))
 
@@ -55,7 +62,35 @@ class Registry:
         """Yield ((target, method), specs) for all registered injectors."""
         yield from self._injectors.items()
 
+    def iter_class_members(self):
+        """Yield (target, [(name, obj)]) for all registered class members."""
+        yield from self._class_members.items()
+
+    def get_class_members(self, target: str) -> List[Tuple[str, Any]]:
+        return list(self._class_members.get(target, []))
+
+    def unregister_injector(self, target: str, method: str, callback: Callable) -> bool:
+        """Remove an injector by callback identity.  Returns True if anything was removed.
+
+        The registry must not be frozen; call :meth:`unfreeze` first.
+        """
+        if self._frozen:
+            raise RuntimeError("Registry is frozen; call unfreeze() before unregistering injectors.")
+        key = (target, method)
+        specs = self._injectors.get(key, [])
+        before = len(specs)
+        self._injectors[key] = [s for s in specs if s.callback is not callback]
+        return len(self._injectors[key]) < before
+
     def freeze(self) -> None:
         self._frozen = True
+
+    def unfreeze(self) -> None:
+        """Allow mutations again (e.g. for hot-reloading)."""
+        self._frozen = False
+
+    def is_frozen(self) -> bool:
+        """Return True if the registry is currently frozen."""
+        return self._frozen
 
 REGISTRY = Registry()
