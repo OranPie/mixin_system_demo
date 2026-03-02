@@ -49,8 +49,6 @@ def _iter_stmts_in_order(fn: ast.FunctionDef) -> List[ast.stmt]:
             if isinstance(s, ast.Try):
                 for h in s.handlers:
                     walk_block(h.body)
-                    walk_block(h.orelse)
-                walk_block(s.finalbody)
     walk_block(fn.body)
     return out
 

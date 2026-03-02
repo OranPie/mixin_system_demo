@@ -26,7 +26,7 @@ def _ensure_registration_allowed(exc: RuntimeError) -> None:
     msg = str(exc)
     if "frozen" in msg.lower():
         raise RuntimeError(
-            "Registry is frozen. Import and register patch modules before calling mixin_system.init()."
+            "Registry is frozen. Import and register patch modules before calling mixpy.init()."
         ) from exc
     raise exc
 
@@ -163,7 +163,7 @@ def at_exception(*, location: Loc | None = None) -> At:
 
 
 def at_yield(*, location: Loc | None = None) -> At:
-    """Return an :class:`~mixin_system.At` descriptor for YIELD injection points."""
+    """Return an :class:`~mixpy.At` descriptor for YIELD injection points."""
     return At(type=TYPE.YIELD, name=None, location=location)
 
 
@@ -381,7 +381,7 @@ def generate_stubs(output_dir: str = ".") -> None:
         stub_file = out_path / f"{module.replace('.', '_')}.pyi"
         lines = [
             f"# Auto-generated stub for mixin injectors targeting {module}\n",
-            "# Do not edit – regenerate with mixin_system.generate_stubs()\n",
+            "# Do not edit – regenerate with mixpy.generate_stubs()\n",
             "from typing import Any\n\n",
         ]
         seen_classes: set[str] = set()

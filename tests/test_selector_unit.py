@@ -2,7 +2,7 @@ import ast
 
 import pytest
 
-from mixin_system.selector import (
+from mixpy.selector import (
     ARGS_MODE,
     KW_MODE,
     STARSTAR_POLICY,

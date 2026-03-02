@@ -219,18 +219,15 @@ def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[st
             ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
 
         if _trace:
-            import sys
-            print(
-                f"[mixin trace] {ci.target}.{ci.method} [{ci.type.value}:{ci.at_name}]"
-                f" cb={getattr(cb, '__qualname__', cb)} trace_id={ci.trace_id}",
-                file=sys.stderr,
-            )
+            from .debug import log_trace, log_cancel
+            log_trace(ci.target, ci.method, ci.type.value, ci.at_name,
+                      getattr(cb, "__qualname__", str(cb)), ci.trace_id)
 
         cb(self_obj, ci, *args_for_cb, **kwargs_for_cb)
         if ci.is_cancelled:
             if _trace:
-                import sys
-                print(f"[mixin trace]   -> cancelled, result={ci.result!r}", file=sys.stderr)
+                from .debug import log_cancel
+                log_cancel(ci.result)
             return ci.result
     return None
 
@@ -260,20 +257,17 @@ async def async_dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, 
             ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
 
         if _trace:
-            import sys
-            print(
-                f"[mixin trace] {ci.target}.{ci.method} [{ci.type.value}:{ci.at_name}]"
-                f" cb={getattr(cb, '__qualname__', cb)} trace_id={ci.trace_id}",
-                file=sys.stderr,
-            )
+            from .debug import log_trace, log_cancel
+            log_trace(ci.target, ci.method, ci.type.value, ci.at_name,
+                      getattr(cb, "__qualname__", str(cb)), ci.trace_id)
 
         result = cb(self_obj, ci, *args_for_cb, **kwargs_for_cb)
         if asyncio.iscoroutine(result):
             await result
         if ci.is_cancelled:
             if _trace:
-                import sys
-                print(f"[mixin trace]   -> cancelled, result={ci.result!r}", file=sys.stderr)
+                from .debug import log_cancel
+                log_cancel(ci.result)
             return ci.result
     return None
 

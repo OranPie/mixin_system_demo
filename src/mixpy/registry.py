@@ -28,7 +28,11 @@ class Registry:
 
     def register_mixin(self, target: str, mixin_cls: type, priority: int = 100) -> None:
         if self._frozen:
-            raise RuntimeError("Registry is frozen; register mixins before init() completes.")
+            raise RuntimeError(
+                f"Registry is frozen — cannot register mixin '{mixin_cls.__qualname__}' "
+                f"for target '{target}'.\n"
+                "  Tip: Import all patch modules *before* calling mixpy.init()."
+            )
         self._targets.setdefault(target, []).append(mixin_cls)
         self._target_priorities[(target, mixin_cls)] = int(priority)
 
@@ -40,7 +44,12 @@ class Registry:
 
     def register_injector(self, target: str, spec: InjectorSpec) -> None:
         if self._frozen:
-            raise RuntimeError("Registry is frozen; register injectors before init() completes.")
+            cb_name = getattr(spec.callback, "__qualname__", str(spec.callback))
+            raise RuntimeError(
+                f"Registry is frozen — cannot register injector '{cb_name}' "
+                f"(method='{spec.method}', target='{target}').\n"
+                "  Tip: Import all patch modules *before* calling mixpy.init()."
+            )
         if spec.mixin_cls is not None:
             spec.mixin_priority = self._target_priorities.get((target, spec.mixin_cls), spec.mixin_priority)
         spec.registration_index = self._next_index
@@ -52,7 +61,10 @@ class Registry:
     def register_class_member(self, target: str, name: str, obj: Any) -> None:
         """Register a new method/property/attribute to inject into the target class at import time."""
         if self._frozen:
-            raise RuntimeError("Registry is frozen; register class members before init() completes.")
+            raise RuntimeError(
+                f"Registry is frozen — cannot register class member '{name}' for target '{target}'.\n"
+                "  Tip: Import all patch modules *before* calling mixpy.init()."
+            )
         self._class_members.setdefault(target, []).append((name, obj))
 
     def get_injectors(self, target: str, method: str) -> List[InjectorSpec]:
@@ -75,7 +87,12 @@ class Registry:
         The registry must not be frozen; call :meth:`unfreeze` first.
         """
         if self._frozen:
-            raise RuntimeError("Registry is frozen; call unfreeze() before unregistering injectors.")
+            cb_name = getattr(callback, "__qualname__", str(callback))
+            raise RuntimeError(
+                f"Registry is frozen — cannot unregister injector '{cb_name}' "
+                f"(method='{method}', target='{target}').\n"
+                "  Tip: Call mixpy.unfreeze() or use reload_target() before unregistering."
+            )
         key = (target, method)
         specs = self._injectors.get(key, [])
         before = len(specs)

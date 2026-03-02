@@ -1,7 +1,7 @@
-from mixin_system.model import At, Loc, OP, TYPE, When
-from mixin_system.registry import InjectorSpec
-from mixin_system.runtime import CallbackInfo
-from mixin_system.weave import build_injector_map
+from mixpy.model import At, Loc, OP, TYPE, When
+from mixpy.registry import InjectorSpec
+from mixpy.runtime import CallbackInfo
+from mixpy.weave import build_injector_map
 
 
 def _fake_registry(injectors_dict):
@@ -27,7 +27,7 @@ def test_build_injector_map_filters_to_requested_module(monkeypatch):
         ("demo_game.utils", "compute"): [spec_mod],  # module-level function target
     })
 
-    monkeypatch.setattr("mixin_system.weave.REGISTRY", fake_registry)
+    monkeypatch.setattr("mixpy.weave.REGISTRY", fake_registry)
 
     inj_map = build_injector_map("demo_game")
 
@@ -47,7 +47,7 @@ def test_build_injector_map_wraps_condition_and_preserves_callback_name(monkeypa
     spec = InjectorSpec(mixin_cls=object, callback=conditional_cb, method="set_value", at=at)
     fake_registry = _fake_registry({("demo_game.player.Player", "set_value"): [spec]})
 
-    monkeypatch.setattr("mixin_system.weave.REGISTRY", fake_registry)
+    monkeypatch.setattr("mixpy.weave.REGISTRY", fake_registry)
 
     inj_map = build_injector_map("demo_game")
     wrapped = inj_map[("demo_game.player.Player", "set_value", "PARAMETER", "value")][0]

@@ -1,5 +1,5 @@
-import mixin_system
-from mixin_system import (
+import mixpy
+from mixpy import (
     mixin, inject, At, TYPE, OP, Loc, When, OCCURRENCE,
     CallSelector, QualifiedSelector, ArgAny, ArgConst,
     SliceSpec, AnchorSpec, NearSpec, KwPattern, STARSTAR_POLICY,

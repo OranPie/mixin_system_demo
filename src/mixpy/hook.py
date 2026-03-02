@@ -102,7 +102,7 @@ class MixinFinder(importlib.abc.MetaPathFinder):
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if not spec or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
             return None
-        if fullname.startswith("mixin_system"):
+        if fullname.startswith("mixpy"):
             return None
         spec.loader = MixinLoader(fullname, spec.origin)
         return spec

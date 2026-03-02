@@ -1,4 +1,4 @@
-"""Tests for the expanded mixin_system features:
+"""Tests for the expanded mixpy features:
   - True Class Mixins (Structural Injection)
   - Async/Await Support
   - Line-Number Targeting
@@ -113,8 +113,8 @@ def test_yield_injection_cancel_substitutes_value():
 
 def test_source_ejection_writes_to_configured_dir(tmp_path):
     import os
-    import mixin_system
-    from mixin_system.debug import set_dump_dir, maybe_dump
+    import mixpy
+    from mixpy.debug import set_dump_dir, maybe_dump
     import ast
 
     dump_dir = tmp_path / "weaved_out"
@@ -133,8 +133,8 @@ def test_source_ejection_writes_to_configured_dir(tmp_path):
 
 def test_source_ejection_default_dir(tmp_path, monkeypatch):
     import os
-    import mixin_system
-    from mixin_system.debug import set_dump_dir, maybe_dump
+    import mixpy
+    from mixpy.debug import set_dump_dir, maybe_dump
     import ast
 
     # Temporarily cd to tmp_path so .weaved/ is created there
@@ -153,11 +153,11 @@ def test_source_ejection_default_dir(tmp_path, monkeypatch):
 
 def test_configure_source_dump_dir(tmp_path):
     import os
-    import mixin_system
-    from mixin_system.debug import set_dump_dir, maybe_dump
+    import mixpy
+    from mixpy.debug import set_dump_dir, maybe_dump
     import ast
 
-    mixin_system.configure(source_dump_dir=str(tmp_path / "custom_weaved"))
+    mixpy.configure(source_dump_dir=str(tmp_path / "custom_weaved"))
     os.environ["MIXIN_DEBUG"] = "True"
     try:
         tree = ast.parse("z = 3\n")
@@ -174,15 +174,15 @@ def test_configure_source_dump_dir(tmp_path):
 
 def test_unregister_injector_removes_callback():
     """unregister_injector returns True when the callback was found and removed."""
-    import mixin_system
-    from mixin_system.registry import REGISTRY
+    import mixpy
+    from mixpy.registry import REGISTRY
 
     # Use a known callback from demo patches and verify unregister API doesn't error.
     # We test the return value when the callback is NOT in the registry (returns False).
     def fake_cb(self_obj, ci):
         pass
 
-    result = mixin_system.unregister_injector(
+    result = mixpy.unregister_injector(
         "demo_game.game.player.player.Player", "calculate_speed", fake_cb
     )
     assert result is False, "should return False when callback not found"
@@ -190,19 +190,19 @@ def test_unregister_injector_removes_callback():
 
 def test_reload_target_raises_for_unloaded_module():
     """reload_target should raise ValueError for a module that isn't imported."""
-    import mixin_system
+    import mixpy
 
     with pytest.raises(ValueError, match="not currently loaded"):
-        mixin_system.reload_target("does_not_exist_xyz_123")
+        mixpy.reload_target("does_not_exist_xyz_123")
 
 
 def test_reload_target_re_imports_module():
     """reload_target forces a fresh import through the MixinLoader."""
-    import mixin_system
+    import mixpy
     import demo_game.game.player.player as player_mod
 
     original_id = id(player_mod.Player)
-    mixin_system.reload_target("demo_game.game.player.player")
+    mixpy.reload_target("demo_game.game.player.player")
     # Re-import to get the fresh module
     import demo_game.game.player.player as player_mod2
     # The Player class should still be accessible after reload
@@ -215,17 +215,17 @@ def test_reload_target_re_imports_module():
 # ---------------------------------------------------------------------------
 
 def test_generate_stubs_creates_files(tmp_path):
-    import mixin_system
+    import mixpy
 
-    mixin_system.generate_stubs(output_dir=str(tmp_path))
+    mixpy.generate_stubs(output_dir=str(tmp_path))
     stubs = list(tmp_path.glob("*.pyi"))
     assert len(stubs) > 0, "generate_stubs should create at least one .pyi file"
 
 
 def test_generate_stubs_content(tmp_path):
-    import mixin_system
+    import mixpy
 
-    mixin_system.generate_stubs(output_dir=str(tmp_path))
+    mixpy.generate_stubs(output_dir=str(tmp_path))
     # Find a stub that mentions Player-related injectors
     contents = "".join(f.read_text() for f in tmp_path.glob("*.pyi"))
     assert "mixin-injected" in contents, ".pyi stubs should contain mixin-injected markers"
@@ -283,7 +283,7 @@ def test_fast_path_does_not_alter_behaviour_when_no_injectors_apply():
 # ---------------------------------------------------------------------------
 
 def test_linespec_construction():
-    from mixin_system import LineSpec
+    from mixpy import LineSpec
 
     spec = LineSpec(lineno=10)
     assert spec.lineno == 10
@@ -294,7 +294,7 @@ def test_linespec_construction():
 
 
 def test_loc_accepts_linespec():
-    from mixin_system import Loc, LineSpec
+    from mixpy import Loc, LineSpec
 
     loc = Loc(line=LineSpec(lineno=5))
     assert loc.line is not None
@@ -306,7 +306,7 @@ def test_loc_accepts_linespec():
 # ---------------------------------------------------------------------------
 
 def test_type_yield_in_enum():
-    from mixin_system import TYPE
+    from mixpy import TYPE
 
     assert TYPE.YIELD == "YIELD"
     assert hasattr(TYPE, "YIELD")

@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
-import mixin_system.runtime as mixin_system_runtime
-import mixin_system.model as mixin_system_model
+import mixpy.runtime as mixpy_runtime
+import mixpy.model as mixpy_model
 
 def ensure_module_globals(globals_dict: Dict[str, Any]) -> None:
     # runtime + model shortcuts
-    globals_dict.setdefault("mixin_system_runtime", mixin_system_runtime)
-    globals_dict.setdefault("mixin_system_model", mixin_system_model)
+    globals_dict.setdefault("mixpy_runtime", mixpy_runtime)
+    globals_dict.setdefault("mixpy_model", mixpy_model)
 
     # injector mapping: key=(target, method, type_name, at_name) -> [callables...]
     globals_dict.setdefault("__mixin_injectors__", {})

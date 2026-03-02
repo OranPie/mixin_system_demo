@@ -1,10 +1,10 @@
-# Library Usage Guide
+# MixPy — Library Usage Guide
 
-This guide explains how to use `mixin_system` to inject behavior into Python classes at import time using AST rewriting.
+This guide explains how to use `mixpy` to inject behavior into Python classes at import time using AST rewriting.
 
 ## What the library does
 
-`mixin_system` installs a meta-path import hook. When a module is imported, it can rewrite matching class methods and weave injector callbacks into the method body.
+`mixpy` installs a meta-path import hook. When a module is imported, it can rewrite matching class methods and weave injector callbacks into the method body.
 
 Supported injection points:
 
@@ -19,7 +19,7 @@ Supported injection points:
 
 1. Define mixin classes and injector methods.
 2. Import the file(s) that register those mixins.
-3. Call `mixin_system.init()`.
+3. Call `mixpy.init()`.
 4. Only then import and use target modules/classes.
 
 `init()` freezes the registry. Registering new mixins after `init()` raises an error.
@@ -29,8 +29,8 @@ Supported injection points:
 ## Minimal example
 
 ```python
-import mixin_system
-from mixin_system import mixin, inject, At, TYPE, Loc, When, OP
+import mixpy
+from mixpy import mixin, inject, At, TYPE, Loc, When, OP
 
 @mixin(target="my_game.player.Player")
 class PlayerPatch:
@@ -42,7 +42,7 @@ class PlayerPatch:
         ci.set_value(0)
 
 # register patches, then initialize
-mixin_system.init()
+mixpy.init()
 
 from my_game.player import Player
 ```
@@ -268,3 +268,55 @@ This allows coarse ordering at mixin level and fine ordering per injector inside
 - Make injectors side-effect-light and deterministic.
 - Add regression tests per injector behavior and per selector/location edge case.
 - If a patch appears ignored, verify import order: targets imported before `init()` are not rewritten.
+
+---
+
+## Networking use-case demo
+
+MixPy ships with a networking example in `src/demo_game/network/`. It demonstrates all major injection types against simulated HTTP and socket clients — **no real network I/O** is performed.
+
+### Scenarios
+
+| Scenario key | What it demonstrates |
+|---|---|
+| `net-http-block` | `HEAD` injector blocks requests to `/blocked` → returns 403 |
+| `net-http-body` | `PARAMETER` injector fills an empty POST body with `"{}"` |
+| `net-http-exception` | `EXCEPTION` injector catches `ConnectionError` → returns 503 |
+| `net-socket-guard` | `PARAMETER` + `EXCEPTION` guard `SocketClient.send()` |
+
+```bash
+PYTHONPATH=src python3 -m demo_game.run_demo --scenario net-http-block
+```
+
+---
+
+## Debug and observability
+
+### Log levels
+
+Set `MIXPY_LOG_LEVEL` to control output verbosity:
+
+```bash
+MIXPY_LOG_LEVEL=DEBUG MIXIN_TRACE=True python3 ...
+```
+
+| Level | Shows |
+|---|---|
+| `DEBUG` | Full injector trace (same as `MIXIN_TRACE=True`) |
+| `INFO` | AST dump notifications, config changes |
+| `WARN` | `require`/`expect` mismatches (default) |
+| `ERROR` | Fatal weaving errors only |
+
+### Programmatic logging
+
+```python
+import mixpy
+mixpy.log("INFO", "Patch loaded for Player.set_health")
+```
+
+### ANSI colour
+
+Colour is emitted automatically when `sys.stderr` is a TTY. Override with:
+```bash
+FORCE_COLOR=1 MIXIN_TRACE=True python3 -m demo_game.run_demo
+```

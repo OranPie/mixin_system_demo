@@ -3,9 +3,9 @@
 ## Commands
 
 ```bash
-python -m demo_game.run_demo              # run demo with all scenarios
-python -m demo_game.run_demo --list       # list available scenario keys
-python -m demo_game.run_demo --scenario invoke-redirect  # run one scenario
+PYTHONPATH=src python3 -m demo_game.run_demo              # run demo with all scenarios
+PYTHONPATH=src python3 -m demo_game.run_demo --list       # list available scenario keys
+PYTHONPATH=src python3 -m demo_game.run_demo --scenario invoke-redirect  # run one scenario
 pytest -q                                  # full test suite
 pytest -q tests/test_demo.py -k invoke    # run tests matching "invoke"
 pytest -q tests/test_weave_unit.py        # run a single test file
@@ -17,12 +17,12 @@ No build step required — pure Python.
 
 The system rewrites Python source **at import time** via a `sys.meta_path` hook:
 
-1. **Registration phase** (before `mixin_system.init()`): patch modules decorated with `@mixin` and `@inject` register `InjectorSpec` entries into a global `REGISTRY` singleton.
-2. **Freeze**: `mixin_system.init()` freezes the registry and installs `MixinFinder`/`MixinLoader` into `sys.meta_path`.
+1. **Registration phase** (before `mixpy.init()`): patch modules decorated with `@mixin` and `@inject` register `InjectorSpec` entries into a global `REGISTRY` singleton.
+2. **Freeze**: `mixpy.init()` freezes the registry and installs `MixinFinder`/`MixinLoader` into `sys.meta_path`.
 3. **Weave phase** (on first import of a target module): `MixinLoader.source_to_code` parses the source, runs `MixinTransformer` (an `ast.NodeTransformer`), which calls `handler.find()` → `apply_location()` → `handler.instrument()` per injection point per method.
 4. **Runtime**: Instrumented code calls helpers in `runtime.py` (`eval_const`, `eval_invoke`, `eval_attr_write`, `dispatch_injectors`) which create a `CallbackInfo` (`ci`) object, evaluate `When`/`Loc` conditions, and invoke the registered callbacks.
 
-**Critical ordering constraint**: patch modules must be imported before `mixin_system.init()` is called. After `init()`, the registry is frozen and no new injectors can be registered.
+**Critical ordering constraint**: patch modules must be imported before `mixpy.init()` is called. After `init()`, the registry is frozen and no new injectors can be registered.
 
 ### Key data flow
 
@@ -88,7 +88,7 @@ Injectors are sorted by `(mixin_priority, injector_priority, mixin_class_qualnam
 - `expect` mismatches: `STRICT` → raise; `ERROR` / `WARN` → warning; `IGNORE` → silent
 
 ### Test isolation
-`tests/conftest.py` performs one-time bootstrap (imports patches, calls `mixin_system.init()`). Tests must not re-initialize the system. Assert observable behavior (return values, state) only — not AST structure.
+`tests/conftest.py` performs one-time bootstrap (imports patches, calls `mixpy.init()`). Tests must not re-initialize the system. Assert observable behavior (return values, state) only — not AST structure.
 
 ### Multiple targets
 `@mixin(target=["pkg.A", "pkg.B"])` registers one patch class against multiple targets.
@@ -97,10 +97,10 @@ Injectors are sorted by `(mixin_priority, injector_priority, mixin_class_qualnam
 Target the module path directly: `@mixin(target="pkg.utils")` with `@inject(method="my_function", ...)`. The `self` argument in module-level callbacks is `None` (or the first parameter value — avoid relying on it).
 
 ### Observability
-Set `MIXIN_TRACE=True` (or `mixin_system.configure(trace=True)`) to log every injector invocation and cancellation to `stderr`. Set `MIXIN_DEBUG=True` to dump transformed AST to `__pycache__/mixin_dump/`.
+Set `MIXIN_TRACE=True` (or `mixpy.configure(trace=True)`) to log every injector invocation and cancellation to `stderr`. Set `MIXIN_DEBUG=True` to dump transformed AST to `__pycache__/mixin_dump/`.
 
 ### INVOKE `starstar_policy`
 When a call site has unresolved `**expr` kwargs: `FAIL` (default) = no match; `IGNORE` = allow but can't satisfy missing keys; `ASSUME_MATCH` = assume unresolved `**expr` covers any required kwargs.
 
 ### Debug mode
-Set `MIXIN_DEBUG=True` (or pass `debug=True` to `mixin_system.init()`) to dump transformed AST to stdout during import.
+Set `MIXIN_DEBUG=True` (or pass `debug=True` to `mixpy.init()`) to dump transformed AST to stdout during import.

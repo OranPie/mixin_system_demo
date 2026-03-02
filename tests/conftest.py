@@ -1,12 +1,15 @@
 import sys
 import pathlib
 
-# Ensure project root on path for pytest invocation from repo folder
+# Ensure src/ layout is on path for pytest invocation from repo folder
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+SRC = ROOT / "src"
+for p in (str(SRC), str(ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-import mixin_system
+import mixpy
 import demo_game.patches  # register patches
+import demo_game.network.patches  # register network patches
 
-mixin_system.init()
+mixpy.init()

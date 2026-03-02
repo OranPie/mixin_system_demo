@@ -36,14 +36,16 @@ class RunSummary:
 def bootstrap_runtime() -> None:
     os.environ.setdefault("MIXIN_DEBUG", "False")
 
-    root = pathlib.Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
+    src = pathlib.Path(__file__).resolve().parents[2]
+    for p in (str(src), str(src.parent)):
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
-    import mixin_system
+    import mixpy
     import demo_game.patches  # noqa: F401  # ensures injectors are registered
+    import demo_game.network.patches  # noqa: F401  # networking injectors
 
-    mixin_system.init()
+    mixpy.init()
 
 
 def _scenario_attribute_guard() -> list[Check]:
@@ -157,6 +159,69 @@ def _scenario_tail_implicit_return() -> list[Check]:
     return [Check("do_nothing()", player.do_nothing(), 123)]
 
 
+# ---------------------------------------------------------------------------
+# Networking scenarios
+# ---------------------------------------------------------------------------
+
+def _scenario_http_head_block() -> list[Check]:
+    from demo_game.network.client import HTTPClient
+
+    client = HTTPClient()
+    r_ok = client.get("/api/data")
+    r_blocked = client.get("/blocked")
+    return [
+        Check("GET /api/data → 200", r_ok.status, 200),
+        Check("GET /blocked → 403 (injected)", r_blocked.status, 403),
+        Check("GET /blocked body", r_blocked.body, "Forbidden"),
+    ]
+
+
+def _scenario_http_param_default_body() -> list[Check]:
+    from demo_game.network.client import HTTPClient
+
+    client = HTTPClient()
+    r_empty = client.post("/api/items", body="")
+    r_full = client.post("/api/items", body='{"name":"x"}')
+    return [
+        Check("POST empty body becomes '{}'", r_empty.body, 'POST http://example.com/api/items -> {}'),
+        Check("POST non-empty body unchanged", r_full.body, 'POST http://example.com/api/items -> {"name":"x"}'),
+    ]
+
+
+def _scenario_http_exception_fallback() -> list[Check]:
+    from demo_game.network.client import HTTPClient, Response
+
+    # Override get so fetch triggers ConnectionError (to exercise EXCEPTION injection)
+    class _BrokenHTTPClient(HTTPClient):
+        def get(self, path: str, headers=None) -> Response:  # type: ignore[override]
+            raise ConnectionError("simulated failure")
+
+    client = _BrokenHTTPClient()
+    r = client.fetch("/api/data")
+    return [
+        Check("fetch() fallback on ConnectionError → 503", r.status, 503),
+    ]
+
+
+def _scenario_socket_send_guard() -> list[Check]:
+    from demo_game.network.client import SocketClient
+
+    sock = SocketClient()
+    sock.connect()
+    n = sock.send(b"hello")
+
+    try:
+        sock.send(b"")
+        caught = False
+    except ValueError:
+        caught = True
+
+    return [
+        Check("send(b'hello') → len 5", n, 5),
+        Check("send(b'') raises ValueError (injected)", caught, True),
+    ]
+
+
 def available_scenarios() -> list[Scenario]:
     return [
         Scenario("attribute-guard", "ATTRIBUTE blocks negative writes", _scenario_attribute_guard),
@@ -169,6 +234,11 @@ def available_scenarios() -> list[Scenario]:
         Scenario("kwargs-policies", "Selector kwargs + **kwargs policy behavior", _scenario_kwargs_policies),
         Scenario("head-kwargs", "HEAD condition can read kwargs", _scenario_head_kwargs_condition),
         Scenario("tail-implicit", "TAIL can override implicit return", _scenario_tail_implicit_return),
+        # Networking demos
+        Scenario("net-http-block", "HEAD blocks specific HTTP path", _scenario_http_head_block),
+        Scenario("net-http-body", "PARAMETER fills empty POST body", _scenario_http_param_default_body),
+        Scenario("net-http-exception", "EXCEPTION fallback on connection failure", _scenario_http_exception_fallback),
+        Scenario("net-socket-guard", "PARAMETER + EXCEPTION guard socket.send()", _scenario_socket_send_guard),
     ]
 
 
@@ -197,7 +267,7 @@ def select_scenarios(scenarios: Sequence[Scenario], keys: Sequence[str] | None) 
 
 
 def _print_header(scenarios: Sequence[Scenario], stream: TextIO) -> None:
-    print("Mixin System Demo", file=stream)
+    print("MixPy Demo", file=stream)
     print(f"Running {len(scenarios)} scenario(s)...", file=stream)
     print("-" * 72, file=stream)
 

@@ -29,9 +29,15 @@ class MixinTransformer(ast.NodeTransformer):
 
     def _handle_count_mismatch(self, *, kind: str, spec: InjectorSpec, matched: int, expected: int, target: str, method: str) -> None:
         pol = self._policy(spec)
+        cb_name = getattr(spec.callback, "__qualname__", str(spec.callback))
+        mixin_name = getattr(spec.mixin_cls, "__qualname__", None) if spec.mixin_cls else None
+        mixin_hint = f" (mixin={mixin_name})" if mixin_name else ""
         msg = (
-            f"{kind} mismatch for {target}.{method} {spec.callback.__qualname__}: "
-            f"matched {matched} != {kind} {expected}"
+            f"[mixpy] {kind} mismatch for '{target}.{method}'{mixin_hint}\n"
+            f"  injector : {cb_name}\n"
+            f"  matched  : {matched}  (expected {kind}={expected})\n"
+            f"  at       : {spec.at!r}\n"
+            f"  Tip: Check that the method signature and injection type match the target source."
         )
         if kind == "require":
             # Policy hierarchy for require:

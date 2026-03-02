@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from mixin_system import api
-from mixin_system.model import OCCURRENCE, POLICY, TYPE, Loc
+from mixpy import api
+from mixpy.model import OCCURRENCE, POLICY, TYPE, Loc
 
 
 class _FakeRegistry:
@@ -121,7 +121,7 @@ def test_mixin_frozen_error_message_is_actionable(monkeypatch):
 
     monkeypatch.setattr(api, "REGISTRY", _FrozenRegistry())
 
-    with pytest.raises(RuntimeError, match=r"before calling mixin_system.init\(\)"):
+    with pytest.raises(RuntimeError, match=r"before calling mixpy.init\(\)"):
         @api.mixin("pkg.mod.Target")
         class Patch:
             pass

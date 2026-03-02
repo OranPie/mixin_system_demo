@@ -1,10 +1,10 @@
 # 库使用指南（中文）
 
-本文档介绍如何使用 `mixin_system` 在 **导入阶段** 通过 AST 重写为 Python 类注入行为。
+本文档介绍如何使用 `mixpy` 在 **导入阶段** 通过 AST 重写为 Python 类注入行为。
 
 ## 库的核心能力
 
-`mixin_system` 会安装一个 `meta_path` 导入钩子。模块首次导入时，系统会匹配目标类方法并织入注入器回调。
+`mixpy` 会安装一个 `meta_path` 导入钩子。模块首次导入时，系统会匹配目标类方法并织入注入器回调。
 
 支持的注入点：
 
@@ -19,7 +19,7 @@
 
 1. 定义 mixin 类与注入器方法。
 2. 导入注册这些 mixin 的模块。
-3. 调用 `mixin_system.init()`。
+3. 调用 `mixpy.init()`。
 4. 再导入并使用目标模块/目标类。
 
 `init()` 会冻结注册表；若在此之后再注册 mixin，会抛出错误。
@@ -29,8 +29,8 @@
 ## 最小示例
 
 ```python
-import mixin_system
-from mixin_system import mixin, inject, At, TYPE, Loc, When, OP
+import mixpy
+from mixpy import mixin, inject, At, TYPE, Loc, When, OP
 
 @mixin(target="my_game.player.Player")
 class PlayerPatch:
@@ -41,7 +41,7 @@ class PlayerPatch:
     def clamp_health(self, ci, value, *args, **kwargs):
         ci.set_value(0)
 
-mixin_system.init()
+mixpy.init()
 
 from my_game.player import Player
 ```

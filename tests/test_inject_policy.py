@@ -2,10 +2,10 @@ import warnings
 
 import pytest
 
-from mixin_system.model import At, POLICY, TYPE
-from mixin_system.registry import InjectorSpec
-from mixin_system.transformer import MixinTransformer
-from mixin_system.errors import MixinMatchError
+from mixpy.model import At, POLICY, TYPE
+from mixpy.registry import InjectorSpec
+from mixpy.transformer import MixinTransformer
+from mixpy.errors import MixinMatchError
 
 
 def _spec(policy: POLICY, *, require=None, expect=None):

@@ -66,11 +66,11 @@ def _get_injectors_call(target: str, method: str, type_name: str, at_name: Any) 
 
 def _mk_ci_ctor(type_member: str, target: str, method: str, at_name: Any) -> ast.Call:
     return ast.Call(
-        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="CallbackInfo", ctx=ast.Load()),
+        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="CallbackInfo", ctx=ast.Load()),
         args=[],
         keywords=[
             ast.keyword(arg="type", value=ast.Attribute(
-                value=ast.Attribute(value=ast.Name(id="mixin_system_model", ctx=ast.Load()), attr="TYPE", ctx=ast.Load()),
+                value=ast.Attribute(value=ast.Name(id="mixpy_model", ctx=ast.Load()), attr="TYPE", ctx=ast.Load()),
                 attr=type_member, ctx=ast.Load()
             )),
             ast.keyword(arg="target", value=ast.Constant(value=target)),
@@ -79,7 +79,7 @@ def _mk_ci_ctor(type_member: str, target: str, method: str, at_name: Any) -> ast
             ast.keyword(arg="trace_id", value=ast.Call(
                 func=ast.Name(id="str", ctx=ast.Load()),
                 args=[ast.Call(
-                    func=ast.Attribute(value=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="time", ctx=ast.Load()), attr="time_ns", ctx=ast.Load()),
+                    func=ast.Attribute(value=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="time", ctx=ast.Load()), attr="time_ns", ctx=ast.Load()),
                     args=[], keywords=[]
                 )],
                 keywords=[]
@@ -90,7 +90,7 @@ def _mk_ci_ctor(type_member: str, target: str, method: str, at_name: Any) -> ast
 def _mk_dispatch_stmt(injectors_expr: ast.expr, ci_name: str, ctx_expr: ast.expr, cb_args: List[ast.expr], cb_keywords: Optional[List[ast.keyword]] = None, *, is_async: bool = False) -> ast.Expr:
     dispatch_attr = "async_dispatch_injectors" if is_async else "dispatch_injectors"
     call = ast.Call(
-        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr=dispatch_attr, ctx=ast.Load()),
+        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr=dispatch_attr, ctx=ast.Load()),
         args=[injectors_expr, ast.Name(id=ci_name, ctx=ast.Load()), ctx_expr, *cb_args],
         keywords=cb_keywords or []
     )
@@ -331,7 +331,7 @@ class ConstHandler:
             def visit_Constant(self, node: ast.Constant):
                 if node in match_nodes:
                     return ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="eval_const", ctx=ast.Load()),
+                        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="eval_const", ctx=ast.Load()),
                         args=[
                             ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
                             ast.Constant(value=target),
@@ -451,7 +451,7 @@ class InvokeHandler:
                     starstars = [k.value for k in node.keywords if k.arg is None]
                     if starstars:
                         kwargs_expr = ast.Call(
-                            func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="merge_kwargs", ctx=ast.Load()),
+                            func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="merge_kwargs", ctx=ast.Load()),
                             args=[explicit, *starstars],
                             keywords=[]
                         )
@@ -459,7 +459,7 @@ class InvokeHandler:
                         kwargs_expr = explicit
 
                     return ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="eval_invoke", ctx=ast.Load()),
+                        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="eval_invoke", ctx=ast.Load()),
                         args=[
                             ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
                             ast.Constant(value=target),
@@ -525,7 +525,7 @@ class AttributeHandler:
                 node = self.generic_visit(node)
                 if node in match_nodes:
                     new_value = ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
+                        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
                         args=[
                             ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
                             ast.Constant(value=target),
@@ -543,7 +543,7 @@ class AttributeHandler:
                 node = self.generic_visit(node)
                 if node in match_nodes and node.value is not None:
                     new_value = ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
+                        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
                         args=[
                             ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
                             ast.Constant(value=target),
@@ -562,7 +562,7 @@ class AttributeHandler:
                 if node in match_nodes:
                     binop = ast.BinOp(left=node.target, op=node.op, right=node.value)
                     new_value = ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
+                        func=ast.Attribute(value=ast.Name(id="mixpy_runtime", ctx=ast.Load()), attr="eval_attr_write", ctx=ast.Load()),
                         args=[
                             ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
                             ast.Constant(value=target),
@@ -681,7 +681,7 @@ class YieldHandler:
                 yield_value = node.value if node.value is not None else ast.Constant(value=None)
                 new_value = ast.Call(
                     func=ast.Attribute(
-                        value=ast.Name(id="mixin_system_runtime", ctx=ast.Load()),
+                        value=ast.Name(id="mixpy_runtime", ctx=ast.Load()),
                         attr="eval_yield",
                         ctx=ast.Load(),
                     ),

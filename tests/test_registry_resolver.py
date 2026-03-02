@@ -1,5 +1,5 @@
-from mixin_system.model import At, TYPE
-from mixin_system.registry import InjectorSpec, Registry
+from mixpy.model import At, TYPE
+from mixpy.registry import InjectorSpec, Registry
 
 
 def _cb(name):
@@ -57,10 +57,10 @@ def test_registration_index_breaks_ties_stably_for_same_mixin_and_priority():
 
 
 def test_mixin_list_target_registers_against_all_targets():
-    from mixin_system.api import mixin, inject
-    from mixin_system.model import At, TYPE
-    from mixin_system.registry import Registry
-    import mixin_system.api as api_mod
+    from mixpy.api import mixin, inject
+    from mixpy.model import At, TYPE
+    from mixpy.registry import Registry
+    import mixpy.api as api_mod
 
     # Use a fresh Registry to avoid polluting global state
     original = api_mod.REGISTRY

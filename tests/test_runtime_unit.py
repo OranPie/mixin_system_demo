@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mixin_system.model import OP, TYPE, When
-from mixin_system.runtime import (
+from mixpy.model import OP, TYPE, When
+from mixpy.runtime import (
     CallbackInfo,
     _eval_when,
     _resolve_path,
@@ -167,6 +167,7 @@ def test_eval_invoke_updated_args_flow_to_later_injectors():
 
 def test_dispatch_injectors_trace_mode_logs_to_stderr(capsys, monkeypatch):
     monkeypatch.setenv("MIXIN_TRACE", "True")
+    monkeypatch.setenv("MIXPY_LOG_LEVEL", "DEBUG")
 
     def cb(self_obj, ci, value):
         ci.cancel(result=42)
@@ -175,6 +176,6 @@ def test_dispatch_injectors_trace_mode_logs_to_stderr(capsys, monkeypatch):
     dispatch_injectors([cb], ci, {}, object(), 5)
 
     captured = capsys.readouterr()
-    assert "[mixin trace]" in captured.err
-    assert "pkg.Player.update" in captured.err
+    assert "[mixpy:DEBUG]" in captured.err
+    assert "pkg.Player" in captured.err
     assert "cancelled" in captured.err

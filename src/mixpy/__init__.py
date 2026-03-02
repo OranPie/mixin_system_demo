@@ -1,4 +1,4 @@
-"""mixin_system: import-time AST mixin injection framework (demo).
+"""mixpy: import-time AST mixin injection framework.
 
 This is a runnable reference implementation intended for iteration.
 """
@@ -31,6 +31,7 @@ from .api import (
 )
 from .model import At, TYPE, OP, Loc, When, POLICY, OCCURRENCE
 from .errors import MixinConflictError, MixinMatchError
+from .debug import log
 
 from .selector import (
     NameSelector, QualifiedSelector, ConstSelector, AttrSelector,
@@ -39,8 +40,10 @@ from .selector import (
 )
 from .location import SliceSpec, NearSpec, AnchorSpec, LineSpec
 
+__version__ = "0.1.0"
+
 __all__ = [
-    "configure","init","mixin","inject","target_path",
+    "configure","init","mixin","inject","target_path","log",
     "at_head","at_tail","at_parameter","at_const","at_invoke","at_attribute","at_exception","at_yield",
     "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute","inject_exception","inject_yield",
     "unregister_injector","reload_target","generate_stubs",
