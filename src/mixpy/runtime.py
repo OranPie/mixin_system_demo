@@ -331,6 +331,23 @@ def eval_attr_write(inj_map, target: str, method: str, at_name: str, self_obj, n
     return new_value
 
 
+def eval_attr_read(inj_map, target: str, method: str, at_name: str, self_obj, attr_value):
+    """Runtime helper for ATTR_READ injection points."""
+    key = (target, method, "ATTR_READ", str(at_name))
+    injectors = inj_map.get(key, [])
+    if not injectors:
+        return attr_value
+    ci = CallbackInfo(type=TYPE.ATTR_READ, target=target, method=method,
+                      at_name=str(at_name), trace_id=str(time.time_ns()))
+    ctx = {"value": attr_value, "attr": str(at_name)}
+    dispatch_injectors(injectors, ci, ctx, self_obj, attr_value)
+    if ci.is_cancelled:
+        return ci.result
+    if ci.value_set:
+        return ci.new_value
+    return attr_value
+
+
 def eval_yield(inj_map, target: str, method: str, at_name: str, self_obj, yield_value):
     """Runtime helper for YIELD injection points.
 
@@ -351,3 +368,58 @@ def eval_yield(inj_map, target: str, method: str, at_name: str, self_obj, yield_
     if ci.value_set:
         return ci.new_value
     return yield_value
+
+
+async def eval_await(inj_map, target: str, method: str, at_name: str, self_obj, awaitable):
+    """Runtime helper for AWAIT injection points."""
+    key = (target, method, "AWAIT", str(at_name))
+    injectors = inj_map.get(key, [])
+    if not injectors:
+        return await awaitable
+    ci = CallbackInfo(type=TYPE.AWAIT, target=target, method=method,
+                      at_name=str(at_name), trace_id=str(time.time_ns()))
+    ctx = {"value": awaitable, "awaitable": awaitable}
+    await async_dispatch_injectors(injectors, ci, ctx, self_obj, awaitable)
+    if ci.is_cancelled:
+        return ci.result
+    if ci.value_set:
+        new_val = ci.new_value
+        if hasattr(new_val, '__await__'):
+            return await new_val
+        return new_val
+    return await awaitable
+
+
+def eval_subscript_read(inj_map, target: str, method: str, at_name: str, self_obj, obj, key):
+    """Runtime helper for SUBSCRIPT read injection points."""
+    original_value = obj[key]
+    key_tuple = (target, method, "SUBSCRIPT", str(at_name))
+    injectors = inj_map.get(key_tuple, [])
+    if not injectors:
+        return original_value
+    ci = CallbackInfo(type=TYPE.SUBSCRIPT, target=target, method=method,
+                      at_name=str(at_name), trace_id=str(time.time_ns()))
+    ctx = {"value": original_value, "object": obj, "key": key, "event": "read"}
+    dispatch_injectors(injectors, ci, ctx, self_obj, original_value)
+    if ci.is_cancelled:
+        return ci.result
+    if ci.value_set:
+        return ci.new_value
+    return original_value
+
+
+def eval_subscript_write(inj_map, target: str, method: str, at_name: str, self_obj, obj, key, new_value):
+    """Runtime helper for SUBSCRIPT write injection points."""
+    key_tuple = (target, method, "SUBSCRIPT", str(at_name))
+    injectors = inj_map.get(key_tuple, [])
+    if not injectors:
+        return new_value
+    ci = CallbackInfo(type=TYPE.SUBSCRIPT, target=target, method=method,
+                      at_name=str(at_name), trace_id=str(time.time_ns()))
+    ctx = {"value": new_value, "object": obj, "key": key, "event": "write"}
+    dispatch_injectors(injectors, ci, ctx, self_obj, new_value)
+    if ci.is_cancelled:
+        return ci.result
+    if ci.value_set:
+        return ci.new_value
+    return new_value

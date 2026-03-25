@@ -169,6 +169,21 @@ def at_yield(*, location: Loc | None = None) -> At:
     return At(type=TYPE.YIELD, name=None, location=location)
 
 
+def at_with(name: str, *, location: Loc | None = None) -> At:
+    """Return an :class:`~mixpy.At` descriptor for WITH injection points."""
+    return At(type=TYPE.WITH, name=name, location=location)
+
+
+def at_await(name: str, *, location: Loc | None = None) -> At:
+    """Return an :class:`~mixpy.At` descriptor for AWAIT injection points."""
+    return At(type=TYPE.AWAIT, name=name, location=location)
+
+
+def at_attr_read(name: str, *, location: Loc | None = None) -> At:
+    """Return an :class:`~mixpy.At` descriptor for ATTR_READ injection points."""
+    return At(type=TYPE.ATTR_READ, name=name, location=location)
+
+
 def inject_head(
     method: str,
     *,
@@ -306,6 +321,69 @@ def inject_yield(
     return inject(
         method=method,
         at=at_yield(location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+def inject_with(
+    method: str,
+    name: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_with(...)``."""
+    return inject(
+        method=method,
+        at=at_with(name=name, location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+def inject_await(
+    method: str,
+    name: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_await(...)``."""
+    return inject(
+        method=method,
+        at=at_await(name=name, location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+def inject_attr_read(
+    method: str,
+    name: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_attr_read(...)``."""
+    return inject(
+        method=method,
+        at=at_attr_read(name=name, location=location),
         priority=priority,
         require=require,
         expect=expect,

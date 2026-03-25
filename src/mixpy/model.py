@@ -15,6 +15,10 @@ class TYPE(str, Enum):
     PARAMETER = "PARAMETER"
     EXCEPTION = "EXCEPTION"
     YIELD = "YIELD"
+    WITH = "WITH"
+    ATTR_READ = "ATTR_READ"
+    AWAIT = "AWAIT"
+    SUBSCRIPT = "SUBSCRIPT"
 
 class OP(str, Enum):
     EQ="EQ"; NE="NE"; GT="GT"; LT="LT"; GE="GE"; LE="LE"
@@ -147,6 +151,22 @@ class At:
     @staticmethod
     def yield_(location: Optional[Loc] = None) -> 'At':
         return At(type=TYPE.YIELD, location=location)
+
+    @staticmethod
+    def with_(name: str, location: Optional[Loc] = None) -> 'At':
+        return At(type=TYPE.WITH, name=name, location=location)
+
+    @staticmethod
+    def attr_read(name: str, location: Optional[Loc] = None) -> 'At':
+        return At(type=TYPE.ATTR_READ, name=name, location=location)
+
+    @staticmethod
+    def await_(name: str, location: Optional[Loc] = None) -> 'At':
+        return At(type=TYPE.AWAIT, name=name, location=location)
+
+    @staticmethod
+    def subscript(name: str, location: Optional[Loc] = None) -> 'At':
+        return At(type=TYPE.SUBSCRIPT, name=name, location=location)
 
     # -- Chaining methods -------------------------------------------------------
 

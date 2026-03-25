@@ -740,6 +740,439 @@ class YieldHandler:
         fn.body = [Rewriter().visit(s) for s in fn.body]
 
 
+class AwaitHandler:
+    """Intercept ``await`` expressions in async functions.
+
+    Callbacks receive the awaitable via ``ci.get_context()['awaitable']`` and
+    can mutate the result with ``ci.set_value(x)`` or cancel with
+    ``ci.cancel(result=x)`` to skip the await entirely.
+    """
+
+    type = TYPE.AWAIT
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        target_name = str(at.name) if at.name else None
+        if index is not None:
+            nodes = index.all_awaits
+        else:
+            nodes = [n for n in ast.walk(fn) if isinstance(n, ast.Await)]
+
+        matches: List[Match] = []
+        for node in nodes:
+            name = self._await_name(node)
+            if target_name and name != target_name:
+                continue
+            parent = index.get_parent(node) if index else None
+            matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
+        return matches
+
+    def _await_name(self, node: ast.Await) -> Optional[str]:
+        """Extract name of the awaited expression."""
+        expr = node.value
+        if isinstance(expr, ast.Call):
+            return self._call_name(expr.func)
+        if isinstance(expr, ast.Name):
+            return expr.id
+        if isinstance(expr, ast.Attribute):
+            parts = _dotted_name_from_attribute(expr)
+            return ".".join(parts) if parts else None
+        return None
+
+    def _call_name(self, func_node: ast.expr) -> Optional[str]:
+        if isinstance(func_node, ast.Name):
+            return func_node.id
+        if isinstance(func_node, ast.Attribute):
+            parts = _dotted_name_from_attribute(func_node)
+            return ".".join(parts) if parts else None
+        return None
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        method = fn.name
+        self_expr = _self_expr(fn)
+        match_nodes: Dict[int, Match] = {id(m.node): m for m in matches}
+
+        class Rewriter(ast.NodeTransformer):
+            def visit_Await(self, node: ast.Await) -> ast.AST:  # type: ignore[override]
+                if id(node) not in match_nodes:
+                    return node
+                m = match_nodes[id(node)]
+                at_name = str(m.at.name) if m.at.name else "AWAIT"
+                # Replace:  await <expr>
+                # With:     await mixpy_runtime.eval_await(..., <expr>)
+                new_value = ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="mixpy_runtime", ctx=ast.Load()),
+                        attr="eval_await",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
+                        ast.Constant(value=target),
+                        ast.Constant(value=method),
+                        ast.Constant(value=at_name),
+                        self_expr,
+                        node.value,  # the original awaitable (not yet awaited)
+                    ],
+                    keywords=[],
+                )
+                return ast.Await(value=new_value)
+
+        fn.body = [Rewriter().visit(s) for s in fn.body]
+
+
+class AttrReadHandler:
+    """Intercept attribute reads (Load context), e.g. ``x = self.hp``."""
+
+    type = TYPE.ATTR_READ
+
+    @staticmethod
+    def _dotted_name(node: ast.AST) -> Optional[str]:
+        parts = _dotted_name_from_attribute(node)
+        return ".".join(parts) if parts else None
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        matches: List[Match] = []
+        target_name = str(at.name) if at.name else None
+
+        nodes = index.all_attr_reads if index else [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.Attribute) and isinstance(getattr(n, 'ctx', None), ast.Load)
+        ]
+
+        for node in nodes:
+            dotted = self._dotted_name(node)
+            if dotted is None:
+                continue
+            if target_name and dotted != target_name:
+                continue
+            parent = index.get_parent(node) if index else None
+            matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
+
+        return matches
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        at_name = injectors[0].at.name
+        method = fn.name
+        self_expr = _self_expr(fn)
+        match_ids = {id(m.node) for m in matches}
+
+        class Rewriter(ast.NodeTransformer):
+            def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+                node = self.generic_visit(node)
+                if id(node) not in match_ids:
+                    return node
+                # Replace self.hp with eval_attr_read(..., self.hp)
+                original_read = ast.Attribute(
+                    value=node.value, attr=node.attr, ctx=ast.Load()
+                )
+                return ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="mixpy_runtime", ctx=ast.Load()),
+                        attr="eval_attr_read",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
+                        ast.Constant(value=target),
+                        ast.Constant(value=method),
+                        ast.Constant(value=str(at_name)),
+                        self_expr,
+                        original_read,
+                    ],
+                    keywords=[],
+                )
+
+        fn.body = [Rewriter().visit(s) for s in fn.body]
+
+
+class WithHandler:
+    """Intercept ``with`` and ``async with`` context manager statements.
+
+    Callbacks receive ``ci.get_context()['event']`` (``"enter"`` or ``"exit"``)
+    and ``ci.get_context()['context_name']``.  Cancelling on ``"enter"`` skips
+    the entire ``with`` block.
+    """
+
+    type = TYPE.WITH
+
+    # -- find ------------------------------------------------------------------
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional['ASTIndex'] = None) -> List[Match]:
+        target_name = str(at.name) if at.name else None
+        if index is not None:
+            nodes = index.all_withs
+        else:
+            nodes = [n for n in ast.walk(fn) if isinstance(n, (ast.With, ast.AsyncWith))]
+
+        matches: List[Match] = []
+        for node in nodes:
+            for item in node.items:
+                name = self._with_name(item)
+                if target_name and name != target_name:
+                    continue
+                matches.append(Match(node=node, parent=None, field=None, index=None, at=at))
+                break  # one match per With statement
+        return matches
+
+    @staticmethod
+    def _with_name(item: ast.withitem) -> Optional[str]:
+        """Extract the context-expression name from a ``withitem``."""
+        expr = item.context_expr
+        if isinstance(expr, ast.Call):
+            if isinstance(expr.func, ast.Name):
+                return expr.func.id
+            if isinstance(expr.func, ast.Attribute):
+                parts: List[str] = []
+                cur: ast.expr = expr.func
+                while isinstance(cur, ast.Attribute):
+                    parts.append(cur.attr)
+                    cur = cur.value
+                if isinstance(cur, ast.Name):
+                    parts.append(cur.id)
+                    return ".".join(reversed(parts))
+        if isinstance(expr, ast.Name):
+            return expr.id
+        if item.optional_vars and isinstance(item.optional_vars, ast.Name):
+            return item.optional_vars.id
+        return None
+
+    # -- instrument ------------------------------------------------------------
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match],
+                   injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+
+        at_name = injectors[0].at.name
+        method = fn.name
+        self_expr = _self_expr(fn)
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
+        match_nodes = {id(m.node) for m in matches}
+
+        # Counter for unique variable names across all with-sites
+        counter = [0]
+
+        def _context_name_for(node: ast.With | ast.AsyncWith) -> str:
+            for item in node.items:
+                n = WithHandler._with_name(item)
+                if n:
+                    return n
+            return "unknown"
+
+        def _make_replacement(node: ast.With | ast.AsyncWith, idx: int) -> List[ast.stmt]:
+            """Build the replacement statement list for one with-node."""
+            ctx_name = _context_name_for(node)
+            inj_var = f"_mixin_inj_with_{idx}"
+            ci_enter = f"_mixin_ci_with_enter_{idx}"
+            ci_exit = f"_mixin_ci_with_exit_{idx}"
+
+            # _mixin_inj_with_N = __mixin_injectors__.get(key, [])
+            inj_assign = ast.Assign(
+                targets=[ast.Name(id=inj_var, ctx=ast.Store())],
+                value=_get_injectors_call(target, method, "WITH", str(at_name)),
+            )
+
+            def _mk_with_ci(ci_name: str, event: str) -> List[ast.stmt]:
+                """Create CI + set ctx + dispatch for an enter/exit event."""
+                ci_assign = ast.Assign(
+                    targets=[ast.Name(id=ci_name, ctx=ast.Store())],
+                    value=_mk_ci_ctor("WITH", target, method, str(at_name)),
+                )
+                ctx_dict = ast.Dict(
+                    keys=[
+                        ast.Constant("self"), ast.Constant("args"),
+                        ast.Constant("kwargs"), ast.Constant("locals"),
+                        ast.Constant("event"), ast.Constant("context_name"),
+                    ],
+                    values=[
+                        self_expr,
+                        _build_args_list_expr(fn),
+                        _build_kwargs_dict_expr(fn),
+                        ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]),
+                        ast.Constant(value=event),
+                        ast.Constant(value=ctx_name),
+                    ],
+                )
+                dispatch = _mk_dispatch_stmt(
+                    ast.Name(id=inj_var, ctx=ast.Load()),
+                    ci_name, ctx_dict, [self_expr], is_async=is_async,
+                )
+                return [ci_assign, dispatch]
+
+            # Enter callback (inside if _mixin_inj_with_N:)
+            enter_stmts = _mk_with_ci(ci_enter, "enter")
+            enter_if = ast.If(
+                test=ast.Name(id=inj_var, ctx=ast.Load()),
+                body=enter_stmts,
+                orelse=[],
+            )
+
+            # Exit callback (inside if _mixin_inj_with_N:)
+            exit_stmts = _mk_with_ci(ci_exit, "exit")
+            exit_if = ast.If(
+                test=ast.Name(id=inj_var, ctx=ast.Load()),
+                body=exit_stmts,
+                orelse=[],
+            )
+
+            # Guard: if not (inj_var and ci_enter.is_cancelled):
+            #     <original with> ... <exit callback>
+            guard_test = ast.BoolOp(
+                op=ast.And(),
+                values=[
+                    ast.Name(id=inj_var, ctx=ast.Load()),
+                    ast.Attribute(
+                        value=ast.Name(id=ci_enter, ctx=ast.Load()),
+                        attr="is_cancelled", ctx=ast.Load(),
+                    ),
+                ],
+            )
+            guarded_body: List[ast.stmt] = [node, exit_if]
+            guard_if = ast.If(
+                test=ast.UnaryOp(op=ast.Not(), operand=guard_test),
+                body=guarded_body,
+                orelse=[],
+            )
+
+            result: List[ast.stmt] = [inj_assign, enter_if, guard_if]
+            for s in result:
+                ast.copy_location(s, node)
+                ast.fix_missing_locations(s)
+            return result
+
+        def _rewrite_body(body: List[ast.stmt]) -> List[ast.stmt]:
+            """Recursively replace matched with-nodes in a statement list."""
+            new_body: List[ast.stmt] = []
+            for stmt in body:
+                # Recurse into sub-blocks first
+                for attr in ("body", "orelse", "finalbody", "handlers"):
+                    sub = getattr(stmt, attr, None)
+                    if isinstance(sub, list):
+                        setattr(stmt, attr, _rewrite_body(sub))
+                # For ExceptHandler, also recurse into its body
+                if isinstance(stmt, ast.ExceptHandler) and hasattr(stmt, "body"):
+                    stmt.body = _rewrite_body(stmt.body)
+
+                if isinstance(stmt, (ast.With, ast.AsyncWith)) and id(stmt) in match_nodes:
+                    idx = counter[0]
+                    counter[0] += 1
+                    new_body.extend(_make_replacement(stmt, idx))
+                else:
+                    new_body.append(stmt)
+            return new_body
+
+        fn.body = _rewrite_body(fn.body)
+
+
+class SubscriptHandler:
+    """Intercept subscript operations (``obj[key]``), both reads and writes."""
+
+    type = TYPE.SUBSCRIPT
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        target_name = str(at.name) if at.name else None
+        nodes = index.all_subscripts if index else [
+            n for n in ast.walk(fn) if isinstance(n, ast.Subscript)
+        ]
+        matches: List[Match] = []
+        for node in nodes:
+            name = self._subscript_name(node)
+            if target_name and name != target_name:
+                continue
+            parent = index.get_parent(node) if index else None
+            matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
+        return matches
+
+    @staticmethod
+    def _subscript_name(node: ast.Subscript) -> Optional[str]:
+        """Extract name of the object being subscripted."""
+        value = node.value
+        if isinstance(value, ast.Name):
+            return value.id
+        if isinstance(value, ast.Attribute):
+            parts: List[str] = []
+            cur: ast.expr = value
+            while isinstance(cur, ast.Attribute):
+                parts.append(cur.attr)
+                cur = cur.value
+            if isinstance(cur, ast.Name):
+                parts.append(cur.id)
+                return ".".join(reversed(parts))
+        return None
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        at_name = injectors[0].at.name
+        method = fn.name
+        self_expr = _self_expr(fn)
+        match_ids = {id(m.node) for m in matches}
+
+        class Rewriter(ast.NodeTransformer):
+            def visit_Assign(self_, node: ast.Assign) -> ast.AST:
+                # Handle write case: target[key] = value
+                node = self_.generic_visit(node)
+                new_targets = []
+                write_sub = None
+                for t in node.targets:
+                    if isinstance(t, ast.Subscript) and id(t) in match_ids:
+                        write_sub = t
+                        match_ids.discard(id(t))
+                    new_targets.append(t)
+                if write_sub is not None:
+                    new_value = ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id="mixpy_runtime", ctx=ast.Load()),
+                            attr="eval_subscript_write",
+                            ctx=ast.Load(),
+                        ),
+                        args=[
+                            ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
+                            ast.Constant(value=target),
+                            ast.Constant(value=method),
+                            ast.Constant(value=str(at_name)),
+                            self_expr,
+                            write_sub.value,
+                            write_sub.slice,
+                            node.value,
+                        ],
+                        keywords=[],
+                    )
+                    return ast.Assign(targets=new_targets, value=new_value)
+                return node
+
+            def visit_Subscript(self_, node: ast.Subscript) -> ast.AST:
+                node = self_.generic_visit(node)
+                if id(node) not in match_ids:
+                    return node
+                if not isinstance(getattr(node, 'ctx', None), ast.Load):
+                    return node
+                # Read case: replace obj[key] with eval_subscript_read(...)
+                return ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="mixpy_runtime", ctx=ast.Load()),
+                        attr="eval_subscript_read",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Name(id="__mixin_injectors__", ctx=ast.Load()),
+                        ast.Constant(value=target),
+                        ast.Constant(value=method),
+                        ast.Constant(value=str(at_name)),
+                        self_expr,
+                        node.value,
+                        node.slice,
+                    ],
+                    keywords=[],
+                )
+
+        fn.body = [Rewriter().visit(s) for s in fn.body]
+
+
 def install_builtin_handlers():
     register_handler(HeadHandler())
     register_handler(ParameterHandler())
@@ -749,3 +1182,7 @@ def install_builtin_handlers():
     register_handler(AttributeHandler())
     register_handler(ExceptionHandler())
     register_handler(YieldHandler())
+    register_handler(WithHandler())
+    register_handler(AwaitHandler())
+    register_handler(AttrReadHandler())
+    register_handler(SubscriptHandler())

@@ -97,6 +97,26 @@ class ASTIndex:
         return self.get_nodes(ast.Yield)
 
     @property
+    def all_awaits(self) -> List[ast.Await]:
+        return self.get_nodes(ast.Await)
+
+    @property
+    def all_attr_reads(self) -> List[ast.Attribute]:
+        return [n for n in self.get_nodes(ast.Attribute)
+                if isinstance(getattr(n, 'ctx', None), ast.Load)]
+
+    @property
+    def all_withs(self) -> List[ast.With | ast.AsyncWith]:
+        result: List[ast.With | ast.AsyncWith] = []
+        result.extend(self.get_nodes(ast.With))
+        result.extend(self.get_nodes(ast.AsyncWith))
+        return result
+
+    @property
+    def all_subscripts(self) -> List[ast.Subscript]:
+        return self.get_nodes(ast.Subscript)
+
+    @property
     def all_assigns(self) -> List[ast.Assign | ast.AnnAssign | ast.AugAssign]:
         result: List[ast.Assign | ast.AnnAssign | ast.AugAssign] = []
         result.extend(self.get_nodes(ast.Assign))
