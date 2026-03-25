@@ -8,6 +8,7 @@ from .api import (
     init,
     inject,
     inject_attribute,
+    inject_attr_read,
     inject_await,
     inject_const,
     inject_exception,
@@ -15,11 +16,13 @@ from .api import (
     inject_invoke,
     inject_loop,
     inject_parameter,
+    inject_subscript,
     inject_tail,
     inject_with,
     inject_yield,
     mixin,
     at_attribute,
+    at_attr_read,
     at_await,
     at_const,
     at_exception,
@@ -27,6 +30,7 @@ from .api import (
     at_invoke,
     at_loop,
     at_parameter,
+    at_subscript,
     at_tail,
     at_with,
     at_yield,
@@ -38,6 +42,9 @@ from .api import (
 from .model import At, TYPE, OP, Loc, When, POLICY, OCCURRENCE
 from .errors import MixinConflictError, MixinMatchError
 from .debug import log
+from .monkey_patch import MonkeyPatchHook
+from .settrace_hook import SettraceHook
+from .hook_strategy import HookStrategy, HookRegistry
 
 from .selector import (
     NameSelector, QualifiedSelector, WildcardSelector, ConstSelector, AttrSelector,
@@ -51,10 +58,14 @@ __version__ = "0.1.0"
 
 __all__ = [
     "configure","init","mixin","inject","target_path","log",
-    "at_head","at_tail","at_parameter","at_const","at_invoke","at_attribute","at_exception","at_yield","at_await","at_with","at_loop",
-    "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute","inject_exception","inject_yield","inject_await","inject_with","inject_loop",
+    "at_head","at_tail","at_parameter","at_const","at_invoke","at_attribute","at_exception","at_yield",
+    "at_await","at_with","at_loop","at_attr_read","at_subscript",
+    "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute",
+    "inject_exception","inject_yield","inject_await","inject_with","inject_loop",
+    "inject_attr_read","inject_subscript",
     "unregister_injector","reload_target","generate_stubs",
     "At","TYPE","OP","POLICY","OCCURRENCE","Loc","When",
+    "MonkeyPatchHook","SettraceHook","HookStrategy","HookRegistry",
     "NameSelector","QualifiedSelector","WildcardSelector","ConstSelector","AttrSelector",
     "CallSelector","ArgAny","ArgConst","ArgName","ArgAttr",
     "ArgRegex","ArgTypeCheck","ArgExpr","AndPattern","OrPattern","NotPattern",

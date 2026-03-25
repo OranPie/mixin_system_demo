@@ -417,6 +417,32 @@ def inject_attr_read(
     )
 
 
+def at_subscript(name: str, *, location: Loc | None = None) -> At:
+    """Return an :class:`~mixpy.At` descriptor for SUBSCRIPT injection points."""
+    return At(type=TYPE.SUBSCRIPT, name=name, location=location)
+
+
+def inject_subscript(
+    method: str,
+    name: str,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_subscript(...)``."""
+    return inject(
+        method=method,
+        at=at_subscript(name=name, location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Hot-reloading / Dynamic Unpatching
 # ---------------------------------------------------------------------------
