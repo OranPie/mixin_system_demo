@@ -1,7 +1,8 @@
 from __future__ import annotations
+import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 # ---- Common name selectors ----
 
@@ -13,12 +14,15 @@ class NameSelector:
 class QualifiedSelector:
     parts: Tuple[str, ...]
 
+    def __post_init__(self):
+        object.__setattr__(self, '_compiled_dotted', ".".join(self.parts))
+
     @staticmethod
     def of(*parts: str) -> "QualifiedSelector":
         return QualifiedSelector(parts=tuple(parts))
 
     def as_dotted(self) -> str:
-        return ".".join(self.parts)
+        return self._compiled_dotted  # type: ignore[attr-defined]
 
 @dataclass(frozen=True)
 class WildcardSelector:
@@ -115,9 +119,13 @@ class ArgAttr(ArgPattern):
 @dataclass(frozen=True)
 class ArgRegex(ArgPattern):
     pattern: str
+
+    def __post_init__(self):
+        object.__setattr__(self, '_compiled_re', re.compile(self.pattern))
+
     def match(self, node) -> bool:
-        import ast, re
-        return isinstance(node, ast.Constant) and isinstance(node.value, str) and re.search(self.pattern, node.value) is not None
+        import ast
+        return isinstance(node, ast.Constant) and isinstance(node.value, str) and self._compiled_re.search(node.value) is not None  # type: ignore[attr-defined]
 
 @dataclass(frozen=True)
 class ArgTypeCheck(ArgPattern):
@@ -175,6 +183,7 @@ class KwPattern:
         mode = self.mode
         if not isinstance(mode, KW_MODE):
             raise TypeError("KwPattern.mode must be a KW_MODE enum value.")
+        object.__setattr__(self, '_keys_frozenset', frozenset(k for k, _ in self.items))
 
 @dataclass(frozen=True)
 class CallSelector:
@@ -238,11 +247,13 @@ class CallSelector:
         if self.kwargs is not None:
             kwmode = self.kwargs.mode
             pats = self.kwargs.as_dict()
+            pat_keys = self.kwargs._keys_frozenset  # type: ignore[attr-defined]
 
-            missing = [k for k in pats.keys() if k not in kwargs_nodes]
+            kw_node_keys = set(kwargs_nodes.keys())
+            missing = pat_keys - kw_node_keys
             if missing:
                 if has_unresolved_starstar and starstar_policy == STARSTAR_POLICY.ASSUME_MATCH and kwmode == KW_MODE.SUBSET:
-                    missing = []
+                    missing = frozenset()
                 else:
                     return False
 
@@ -251,7 +262,92 @@ class CallSelector:
                     return False
 
             if kwmode == KW_MODE.EXACT:
-                if set(kwargs_nodes.keys()) != set(pats.keys()):
+                if kw_node_keys != pat_keys:
                     return False
 
         return True
+
+    def compile(self) -> Callable:
+        """Return a pre-optimized match function for repeated use.
+
+        Pre-computes invariants from the selector so that repeated calls avoid
+        redundant attribute lookups, dict conversions, and object allocations.
+        """
+        # Pre-compute func matching invariants
+        func_sel = self.func
+        if func_sel is not None and isinstance(func_sel, QualifiedSelector):
+            func_expected_parts = func_sel.parts
+        else:
+            func_expected_parts = None
+        has_wildcard = func_sel is not None and isinstance(func_sel, WildcardSelector)
+
+        # Pre-compute args invariants
+        n_args = len(self.args)
+        args_pats = self.args
+        exact_args = self.args_mode == ARGS_MODE.EXACT
+
+        # Pre-compute kwargs invariants
+        if self.kwargs is not None:
+            kw_dict = self.kwargs.as_dict()
+            kw_keys = self.kwargs._keys_frozenset  # type: ignore[attr-defined]
+            kw_exact = self.kwargs.mode == KW_MODE.EXACT
+            kw_items = tuple(kw_dict.items())
+        else:
+            kw_dict = None
+            kw_keys = None
+            kw_exact = False
+            kw_items = ()
+
+        sp = self.starstar_policy
+
+        def _match(
+            func_parts_in: Optional[Tuple[str, ...]],
+            args_nodes: Sequence,
+            kwargs_nodes: Dict[str, Any],
+            *,
+            has_unresolved_starstar: bool = False,
+        ) -> bool:
+            # --- func ---
+            if func_expected_parts is not None:
+                if func_parts_in != func_expected_parts:
+                    return False
+            elif has_wildcard:
+                if func_parts_in is None or not func_sel.matches(".".join(func_parts_in)):  # type: ignore[union-attr]
+                    return False
+
+            # --- args ---
+            n_nodes = len(args_nodes)
+            if exact_args:
+                if n_nodes != n_args:
+                    return False
+            if n_nodes < n_args:
+                return False
+            for i in range(n_args):
+                if not args_pats[i].match(args_nodes[i]):
+                    return False
+
+            # --- starstar gate ---
+            if has_unresolved_starstar and sp == STARSTAR_POLICY.FAIL:
+                return False
+
+            # --- kwargs ---
+            if kw_dict is not None:
+                kw_node_keys = set(kwargs_nodes.keys())
+                missing = kw_keys - kw_node_keys  # type: ignore[operator]
+                if missing:
+                    if has_unresolved_starstar and sp == STARSTAR_POLICY.ASSUME_MATCH and not kw_exact:
+                        pass  # assume covered
+                    else:
+                        return False
+
+                for k, pat in kw_items:
+                    if k in kwargs_nodes and not pat.match(kwargs_nodes[k]):
+                        return False
+
+                if kw_exact:
+                    if kw_node_keys != kw_keys:
+                        return False
+
+            return True
+
+        return _match
