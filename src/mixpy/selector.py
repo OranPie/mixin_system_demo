@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 # ---- Common name selectors ----
 
@@ -19,6 +19,18 @@ class QualifiedSelector:
 
     def as_dotted(self) -> str:
         return ".".join(self.parts)
+
+@dataclass(frozen=True)
+class WildcardSelector:
+    pattern: str  # glob pattern like "self.calc_*" or "*.process"
+
+    @staticmethod
+    def of(pattern: str) -> "WildcardSelector":
+        return WildcardSelector(pattern=pattern)
+
+    def matches(self, dotted_name: str) -> bool:
+        import fnmatch
+        return fnmatch.fnmatch(dotted_name, self.pattern)
 
 # ---- CONST selectors ----
 
@@ -101,6 +113,49 @@ class ArgAttr(ArgPattern):
         return False
 
 @dataclass(frozen=True)
+class ArgRegex(ArgPattern):
+    pattern: str
+    def match(self, node) -> bool:
+        import ast, re
+        return isinstance(node, ast.Constant) and isinstance(node.value, str) and re.search(self.pattern, node.value) is not None
+
+@dataclass(frozen=True)
+class ArgTypeCheck(ArgPattern):
+    type_name: str  # "int", "float", "str", "bool", "NoneType"
+    def match(self, node) -> bool:
+        import ast
+        return isinstance(node, ast.Constant) and type(node.value).__name__ == self.type_name
+
+@dataclass(frozen=True)
+class ArgExpr(ArgPattern):
+    code: str  # e.g. "isinstance(node, ast.Constant) and node.value > 0"
+    def match(self, node) -> bool:
+        import ast
+        return bool(eval(self.code, {"ast": ast, "node": node, "__builtins__": {
+            "isinstance": isinstance, "len": len, "str": str, "int": int,
+            "float": float, "bool": bool, "type": type, "hasattr": hasattr,
+            "getattr": getattr,
+        }}))
+
+@dataclass(frozen=True)
+class AndPattern(ArgPattern):
+    patterns: Tuple[ArgPattern, ...]
+    def match(self, node) -> bool:
+        return all(p.match(node) for p in self.patterns)
+
+@dataclass(frozen=True)
+class OrPattern(ArgPattern):
+    patterns: Tuple[ArgPattern, ...]
+    def match(self, node) -> bool:
+        return any(p.match(node) for p in self.patterns)
+
+@dataclass(frozen=True)
+class NotPattern(ArgPattern):
+    pattern: ArgPattern
+    def match(self, node) -> bool:
+        return not self.pattern.match(node)
+
+@dataclass(frozen=True)
 class KwPattern:
     items: Tuple[Tuple[str, ArgPattern], ...]
     mode: KW_MODE = KW_MODE.SUBSET
@@ -133,7 +188,7 @@ class CallSelector:
     - ASSUME_MATCH: allow unresolved **kwargs. For SUBSET, missing required keys may be assumed present.
                     For EXACT, behaves like IGNORE (exact on known keys).
     """
-    func: Optional[QualifiedSelector] = None
+    func: Optional[Union[QualifiedSelector, WildcardSelector]] = None
     args: Tuple[ArgPattern, ...] = ()
     args_mode: ARGS_MODE = ARGS_MODE.PREFIX
     kwargs: Optional[KwPattern] = None
@@ -157,8 +212,12 @@ class CallSelector:
     ) -> bool:
         # func
         if self.func is not None:
-            if func_parts != self.func.parts:
-                return False
+            if isinstance(self.func, WildcardSelector):
+                if func_parts is None or not self.func.matches(".".join(func_parts)):
+                    return False
+            else:
+                if func_parts != self.func.parts:
+                    return False
 
         # args
         mode = self.args_mode

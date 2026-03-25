@@ -34,9 +34,10 @@ from .errors import MixinConflictError, MixinMatchError
 from .debug import log
 
 from .selector import (
-    NameSelector, QualifiedSelector, ConstSelector, AttrSelector,
-    CallSelector, ArgAny, ArgConst, ArgName, ArgAttr, KwPattern,
-    ARGS_MODE, KW_MODE, STARSTAR_POLICY
+    NameSelector, QualifiedSelector, WildcardSelector, ConstSelector, AttrSelector,
+    CallSelector, ArgAny, ArgConst, ArgName, ArgAttr,
+    ArgRegex, ArgTypeCheck, ArgExpr, AndPattern, OrPattern, NotPattern,
+    KwPattern, ARGS_MODE, KW_MODE, STARSTAR_POLICY
 )
 from .location import SliceSpec, NearSpec, AnchorSpec, LineSpec
 
@@ -48,8 +49,10 @@ __all__ = [
     "inject_head","inject_tail","inject_parameter","inject_const","inject_invoke","inject_attribute","inject_exception","inject_yield",
     "unregister_injector","reload_target","generate_stubs",
     "At","TYPE","OP","POLICY","OCCURRENCE","Loc","When",
-    "NameSelector","QualifiedSelector","ConstSelector","AttrSelector",
-    "CallSelector","ArgAny","ArgConst","ArgName","ArgAttr","KwPattern",
+    "NameSelector","QualifiedSelector","WildcardSelector","ConstSelector","AttrSelector",
+    "CallSelector","ArgAny","ArgConst","ArgName","ArgAttr",
+    "ArgRegex","ArgTypeCheck","ArgExpr","AndPattern","OrPattern","NotPattern",
+    "KwPattern",
     "ARGS_MODE","KW_MODE","STARSTAR_POLICY",
     "SliceSpec","NearSpec","AnchorSpec","LineSpec",
     "MixinConflictError","MixinMatchError",

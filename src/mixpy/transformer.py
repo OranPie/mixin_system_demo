@@ -7,6 +7,7 @@ from .registry import REGISTRY, InjectorSpec
 from .handlers import get_handler
 from .errors import MixinMatchError
 from .location_utils import apply_location
+from .ast_index import ASTIndex
 
 def transform_module(source: str, filename: str, module_name: str) -> ast.Module:
     tree = ast.parse(source, filename=filename)
@@ -65,13 +66,15 @@ class MixinTransformer(ast.NodeTransformer):
         injectors = REGISTRY.get_injectors(target, item.name)
         if not injectors:
             return
+        # Build a shared AST index once per function — avoids repeated ast.walk() in handlers
+        ast_idx = ASTIndex(item)
         # Group by At (type+name+selector+location) for batching
         by_at: Dict[At, List[InjectorSpec]] = {}
         for spec in injectors:
             by_at.setdefault(spec.at, []).append(spec)
         for at, specs in by_at.items():
             handler = get_handler(at.type)
-            matches = apply_location(item, handler.find(item, at), at)
+            matches = apply_location(item, handler.find(item, at, index=ast_idx), at)
             # enforce require/expect for each spec (simple: same match count)
             for spec in specs:
                 if spec.require is not None and len(matches) != spec.require:

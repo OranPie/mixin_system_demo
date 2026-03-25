@@ -3,8 +3,21 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 import asyncio
 import os
+import re
 import time
 from .model import TYPE, When, OP
+
+# Pre-compiled regex for _resolve_path
+_PATH_SPLIT_RE = re.compile(r'\.(?![^\[]*\])')
+_PATH_TOKEN_RE = re.compile(r'(\w+)(\[(\d+)\])?')
+
+# Cached trace flag — avoids os.getenv() on every dispatch call.
+# Updated by set_trace() and read by dispatch_injectors / async_dispatch_injectors.
+_TRACE_ENABLED: bool = os.getenv("MIXIN_TRACE") == "True"
+
+def set_trace(enabled: bool) -> None:
+    global _TRACE_ENABLED
+    _TRACE_ENABLED = enabled
 
 @dataclass
 class CallbackInfo:
@@ -133,7 +146,6 @@ def _eval_when(cond: Optional[When], ctx: Dict[str, Any]) -> bool:
     if op == OP.NOT_NONE: return left_val is not None
     if op == OP.ISINSTANCE: return isinstance(left_val, right)
     if op == OP.MATCH:
-        import re
         return re.search(str(right), str(left_val)) is not None
     if op == OP.LEN_EQ: return len(left_val) == right
     if op == OP.LEN_GT: return len(left_val) > right
@@ -144,11 +156,15 @@ def _resolve_path(ctx: Dict[str, Any], path: str) -> Any:
     # supports dotted names and simple [index] for list access like args[0]
     if path in ctx:
         return ctx[path]
+    # Fast path: simple key with no dots or brackets (common case)
+    if '.' not in path and '[' not in path:
+        if isinstance(ctx, dict):
+            return ctx.get(path)
+        return getattr(ctx, path, None)
     cur: Any = ctx
-    import re
-    tokens = re.split(r'\.(?![^\[]*\])', path)
+    tokens = _PATH_SPLIT_RE.split(path)
     for t in tokens:
-        m = re.fullmatch(r'(\w+)(\[(\d+)\])?', t)
+        m = _PATH_TOKEN_RE.fullmatch(t)
         if not m:
             return None
         key = m.group(1)
@@ -201,22 +217,23 @@ def merge_kwargs(*maps: Any) -> Dict[str, Any]:
 def dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, ctx: Dict[str, Any], *cb_args, **cb_kwargs):
     """Call injectors with signature: (self_obj, ci, *args, **kwargs)."""
     self_obj = cb_args[0] if cb_args else None
-    rest = list(cb_args[1:]) if len(cb_args) > 1 else []
-    ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=rest, kwargs=dict(cb_kwargs))
+    rest = cb_args[1:] if len(cb_args) > 1 else ()
+    ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=list(rest), kwargs=dict(cb_kwargs))
     ci._ctx = ctx2
 
-    _trace = os.getenv("MIXIN_TRACE") == "True"
+    _trace = _TRACE_ENABLED
 
     for cb in injectors:
-        args_for_cb = list(rest)
-        kwargs_for_cb = dict(cb_kwargs)
         if ci.type == TYPE.INVOKE and ci._call_args is not None and ci._call_kwargs is not None:
-            args_for_cb = list(ci._call_args)
-            kwargs_for_cb = dict(ci._call_kwargs)
+            args_for_cb = ci._call_args
+            kwargs_for_cb = ci._call_kwargs
             ci._ctx["args"] = list(args_for_cb)
             ci._ctx["kwargs"] = dict(kwargs_for_cb)
             ci._ctx["call_args"] = list(args_for_cb)
             ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
+        else:
+            args_for_cb = rest
+            kwargs_for_cb = cb_kwargs
 
         if _trace:
             from .debug import log_trace, log_cancel
