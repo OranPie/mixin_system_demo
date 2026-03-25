@@ -169,6 +169,11 @@ def at_yield(*, location: Loc | None = None) -> At:
     return At(type=TYPE.YIELD, name=None, location=location)
 
 
+def at_loop(name: str | None = None, *, location: Loc | None = None) -> At:
+    """Return an :class:`~mixpy.At` descriptor for LOOP injection points."""
+    return At(type=TYPE.LOOP, name=name, location=location)
+
+
 def at_with(name: str, *, location: Loc | None = None) -> At:
     """Return an :class:`~mixpy.At` descriptor for WITH injection points."""
     return At(type=TYPE.WITH, name=name, location=location)
@@ -321,6 +326,27 @@ def inject_yield(
     return inject(
         method=method,
         at=at_yield(location=location),
+        priority=priority,
+        require=require,
+        expect=expect,
+        policy=policy,
+    )
+
+
+def inject_loop(
+    method: str,
+    name: str | None = None,
+    *,
+    location: Loc | None = None,
+    priority: int = 100,
+    require: int | None = None,
+    expect: int | None = None,
+    policy: POLICY = POLICY.ERROR,
+):
+    """Shorthand for :func:`inject` with ``at=at_loop(...)``."""
+    return inject(
+        method=method,
+        at=at_loop(name=name, location=location),
         priority=priority,
         require=require,
         expect=expect,

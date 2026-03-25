@@ -15,6 +15,7 @@ class TYPE(str, Enum):
     PARAMETER = "PARAMETER"
     EXCEPTION = "EXCEPTION"
     YIELD = "YIELD"
+    LOOP = "LOOP"
     WITH = "WITH"
     ATTR_READ = "ATTR_READ"
     AWAIT = "AWAIT"
@@ -151,6 +152,10 @@ class At:
     @staticmethod
     def yield_(location: Optional[Loc] = None) -> 'At':
         return At(type=TYPE.YIELD, location=location)
+
+    @staticmethod
+    def loop(name: Any = None, location: Optional[Loc] = None) -> 'At':
+        return At(type=TYPE.LOOP, name=name, location=location)
 
     @staticmethod
     def with_(name: str, location: Optional[Loc] = None) -> 'At':

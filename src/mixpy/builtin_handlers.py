@@ -1173,6 +1173,182 @@ class SubscriptHandler:
         fn.body = [Rewriter().visit(s) for s in fn.body]
 
 
+class LoopHandler:
+    """Intercept ``for``, ``while``, and ``async for`` loops.
+
+    Callbacks receive entry/exit events via ``ci.get_context()['event']``
+    (``"entry"`` or ``"exit"``).  ``ci.cancel()`` on entry skips the loop.
+    """
+
+    type = TYPE.LOOP
+
+    @staticmethod
+    def _loop_name(node: ast.AST) -> str:
+        if isinstance(node, ast.For):
+            if isinstance(node.target, ast.Name):
+                return node.target.id
+            return "for"
+        elif isinstance(node, ast.AsyncFor):
+            if isinstance(node.target, ast.Name):
+                return node.target.id
+            return "async_for"
+        elif isinstance(node, ast.While):
+            return "while"
+        return "loop"
+
+    @staticmethod
+    def _loop_type(node: ast.AST) -> str:
+        if isinstance(node, ast.For):
+            return "for"
+        elif isinstance(node, ast.AsyncFor):
+            return "async_for"
+        elif isinstance(node, ast.While):
+            return "while"
+        return "loop"
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        target_name = str(at.name) if at.name is not None else None
+        if index is not None:
+            nodes = index.all_loops
+        else:
+            nodes = [n for n in ast.walk(fn) if isinstance(n, (ast.For, ast.While, ast.AsyncFor))]
+        matches: List[Match] = []
+        for node in nodes:
+            name = self._loop_name(node)
+            if target_name and name != target_name:
+                continue
+            parent = index.get_parent(node) if index else None
+            matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
+        return matches
+
+    def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
+        if not matches:
+            return
+        is_async = isinstance(fn, ast.AsyncFunctionDef)
+        method = fn.name
+        at_name = injectors[0].at.name
+        canon_name = str(at_name) if at_name is not None else "LOOP"
+        self_expr_fn = _self_expr(fn)
+        match_ids = {id(m.node) for m in matches}
+        handler_ref = self
+
+        class _LoopRewriter(ast.NodeTransformer):
+            _counter = 0
+
+            def _wrap_loop(self, node: ast.AST) -> Any:
+                if id(node) not in match_ids:
+                    return node
+                idx = _LoopRewriter._counter
+                _LoopRewriter._counter += 1
+                loop_type = handler_ref._loop_type(node)
+                loop_var = handler_ref._loop_name(node)
+
+                inj_var = f"_mixin_inj_loop_{idx}"
+                ci_entry = f"_mixin_ci_loop_{idx}_e"
+                ci_exit = f"_mixin_ci_loop_{idx}_x"
+                skip_var = f"_mixin_loop_{idx}_skip"
+
+                inj_assign = ast.Assign(
+                    targets=[ast.Name(id=inj_var, ctx=ast.Store())],
+                    value=_get_injectors_call(target, method, "LOOP", canon_name),
+                )
+                skip_assign = ast.Assign(
+                    targets=[ast.Name(id=skip_var, ctx=ast.Store())],
+                    value=ast.Constant(value=False),
+                )
+
+                # --- entry dispatch ---
+                ci_entry_assign = ast.Assign(
+                    targets=[ast.Name(id=ci_entry, ctx=ast.Store())],
+                    value=_mk_ci_ctor("LOOP", target, method, canon_name),
+                )
+                ctx_entry = ast.Dict(
+                    keys=[ast.Constant("event"), ast.Constant("loop_type"),
+                          ast.Constant("loop_var"), ast.Constant("self"),
+                          ast.Constant("args"), ast.Constant("kwargs"),
+                          ast.Constant("locals")],
+                    values=[ast.Constant("entry"), ast.Constant(loop_type),
+                            ast.Constant(loop_var), self_expr_fn,
+                            _build_args_list_expr(fn), _build_kwargs_dict_expr(fn),
+                            ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[])],
+                )
+                dispatch_entry = _mk_dispatch_stmt(
+                    ast.Name(id=inj_var, ctx=ast.Load()),
+                    ci_entry, ctx_entry, [self_expr_fn], is_async=is_async,
+                )
+                cancel_check = ast.If(
+                    test=ast.Attribute(value=ast.Name(id=ci_entry, ctx=ast.Load()),
+                                       attr="is_cancelled", ctx=ast.Load()),
+                    body=[ast.Assign(targets=[ast.Name(id=skip_var, ctx=ast.Store())],
+                                     value=ast.Constant(value=True))],
+                    orelse=[],
+                )
+                entry_if = ast.If(
+                    test=ast.Name(id=inj_var, ctx=ast.Load()),
+                    body=[ci_entry_assign, dispatch_entry, cancel_check],
+                    orelse=[],
+                )
+
+                # --- exit dispatch (in finally) ---
+                ci_exit_assign = ast.Assign(
+                    targets=[ast.Name(id=ci_exit, ctx=ast.Store())],
+                    value=_mk_ci_ctor("LOOP", target, method, canon_name),
+                )
+                ctx_exit = ast.Dict(
+                    keys=[ast.Constant("event"), ast.Constant("loop_type"),
+                          ast.Constant("loop_var"), ast.Constant("self"),
+                          ast.Constant("args"), ast.Constant("kwargs"),
+                          ast.Constant("locals")],
+                    values=[ast.Constant("exit"), ast.Constant(loop_type),
+                            ast.Constant(loop_var), self_expr_fn,
+                            _build_args_list_expr(fn), _build_kwargs_dict_expr(fn),
+                            ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[])],
+                )
+                dispatch_exit = _mk_dispatch_stmt(
+                    ast.Name(id=inj_var, ctx=ast.Load()),
+                    ci_exit, ctx_exit, [self_expr_fn], is_async=is_async,
+                )
+                exit_if = ast.If(
+                    test=ast.Name(id=inj_var, ctx=ast.Load()),
+                    body=[ci_exit_assign, dispatch_exit],
+                    orelse=[],
+                )
+
+                try_finally = ast.Try(
+                    body=[node], handlers=[], orelse=[], finalbody=[exit_if],
+                )
+                main_if = ast.If(
+                    test=ast.UnaryOp(op=ast.Not(),
+                                     operand=ast.Name(id=skip_var, ctx=ast.Load())),
+                    body=[try_finally],
+                    orelse=[],
+                )
+
+                return [inj_assign, skip_assign, entry_if, main_if]
+
+            def visit_For(self, node: ast.For):
+                self.generic_visit(node)
+                return self._wrap_loop(node)
+
+            def visit_While(self, node: ast.While):
+                self.generic_visit(node)
+                return self._wrap_loop(node)
+
+            def visit_AsyncFor(self, node: ast.AsyncFor):
+                self.generic_visit(node)
+                return self._wrap_loop(node)
+
+        rewriter = _LoopRewriter()
+        new_body: List[ast.AST] = []
+        for stmt in fn.body:
+            result = rewriter.visit(stmt)
+            if isinstance(result, list):
+                new_body.extend(result)
+            else:
+                new_body.append(result)
+        fn.body = new_body
+
+
 def install_builtin_handlers():
     register_handler(HeadHandler())
     register_handler(ParameterHandler())
@@ -1182,6 +1358,7 @@ def install_builtin_handlers():
     register_handler(AttributeHandler())
     register_handler(ExceptionHandler())
     register_handler(YieldHandler())
+    register_handler(LoopHandler())
     register_handler(WithHandler())
     register_handler(AwaitHandler())
     register_handler(AttrReadHandler())

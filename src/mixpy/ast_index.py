@@ -117,6 +117,14 @@ class ASTIndex:
         return self.get_nodes(ast.Subscript)
 
     @property
+    def all_loops(self) -> List[ast.For | ast.While | ast.AsyncFor]:
+        result: List[ast.For | ast.While | ast.AsyncFor] = []
+        result.extend(self.get_nodes(ast.For))
+        result.extend(self.get_nodes(ast.While))
+        result.extend(self.get_nodes(ast.AsyncFor))
+        return result
+
+    @property
     def all_assigns(self) -> List[ast.Assign | ast.AnnAssign | ast.AugAssign]:
         result: List[ast.Assign | ast.AnnAssign | ast.AugAssign] = []
         result.extend(self.get_nodes(ast.Assign))
