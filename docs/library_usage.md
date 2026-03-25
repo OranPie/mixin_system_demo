@@ -289,6 +289,152 @@ Loc.relative_to(at1, offset=1) # One position after anchor
 
 ---
 
+## New Injection Point Types
+
+Sprint 2 adds five new injection types, bringing the total to 13. Each has a corresponding `at_*` builder and `inject_*` shortcut decorator.
+
+### ATTR_READ — intercept attribute reads
+
+Fires when an attribute is **read** (as opposed to `ATTRIBUTE` which fires on writes).
+
+```python
+from mixpy import mixin, inject, At, TYPE
+
+@mixin(target="my_game.player.Player")
+class PlayerReadPatch:
+    @inject(
+        method="get_status",
+        at=At(type=TYPE.ATTR_READ, name="health"),
+    )
+    def on_health_read(self, ci, value):
+        # value is the current attribute value being read
+        print(f"Health accessed: {value}")
+        # optionally override what the caller sees
+        ci.set_value(max(0, value))
+```
+
+Ergonomic helpers:
+
+```python
+at_attr_read("health")
+inject_attr_read(method="get_status", name="health")
+```
+
+Callback signature: `def cb(self, ci, value)` — `value` is the attribute value at read time.
+
+### LOOP — hook loop entry and exit
+
+Fires at the entry and exit of `for` and `while` loops.
+
+```python
+@mixin(target="my_game.world.World")
+class WorldLoopPatch:
+    @inject(
+        method="update_entities",
+        at=At(type=TYPE.LOOP, name="entity"),  # for entity in ...
+    )
+    def on_entity_loop(self, ci, *args, **kwargs):
+        # Entry callback — ci.cancel() skips the entire loop
+        print("Entering entity update loop")
+
+    @inject(
+        method="update_entities",
+        at=At(type=TYPE.LOOP),  # any loop in the method
+    )
+    def on_any_loop(self, ci, *args, **kwargs):
+        print("Loop complete")
+```
+
+Ergonomic helpers:
+
+```python
+at_loop("entity")     # target loop with specific variable
+at_loop()             # target any loop in the method
+inject_loop(method="update_entities", name="entity")
+```
+
+The entry callback can call `ci.cancel()` to skip the loop entirely. The exit callback fires after the loop completes normally.
+
+### WITH — hook context manager enter/exit
+
+Fires when a `with` statement's context manager is entered or exited.
+
+```python
+@mixin(target="my_game.io.SaveManager")
+class SaveManagerPatch:
+    @inject(
+        method="save_game",
+        at=At(type=TYPE.WITH, name="open"),  # with open(...) as f
+    )
+    def on_file_open(self, ci, *args, **kwargs):
+        print("Context manager 'open' entered")
+```
+
+Ergonomic helpers:
+
+```python
+at_with("open")
+inject_with(method="save_game", name="open")
+```
+
+### AWAIT — hook await expressions
+
+Fires around `await` expressions in async functions.
+
+```python
+@mixin(target="my_game.network.AsyncClient")
+class AsyncClientPatch:
+    @inject(
+        method="fetch_data",
+        at=At(type=TYPE.AWAIT, name="session.get"),
+    )
+    def on_await_get(self, ci, *args, **kwargs):
+        print(f"Awaiting session.get")
+        # ci.cancel(result=cached_response) to skip the await
+```
+
+Ergonomic helpers:
+
+```python
+at_await("session.get")
+inject_await(method="fetch_data", name="session.get")
+```
+
+### SUBSCRIPT — hook `obj[key]` read/write
+
+Fires on subscript (index/key) access — both reads (`x = obj[key]`) and writes (`obj[key] = x`).
+
+```python
+@mixin(target="my_game.inventory.Inventory")
+class InventoryPatch:
+    @inject(
+        method="get_item",
+        at=At(type=TYPE.SUBSCRIPT, name="items"),  # self.items[key]
+    )
+    def on_item_access(self, ci, *args, **kwargs):
+        ctx = ci.get_context()
+        print(f"Subscript access on 'items': key={ctx.get('key')}")
+```
+
+Ergonomic helpers:
+
+```python
+at_subscript("items")
+inject_subscript(method="get_item", name="items")
+```
+
+### Summary table
+
+| Type | Target | Builder | Shortcut decorator |
+|---|---|---|---|
+| `ATTR_READ` | `x = obj.attr` | `at_attr_read("attr")` | `inject_attr_read(method, name)` |
+| `LOOP` | `for`/`while` loops | `at_loop("var")` | `inject_loop(method, name)` |
+| `WITH` | `with` statements | `at_with("ctx_name")` | `inject_with(method, name)` |
+| `AWAIT` | `await` expressions | `at_await("coro")` | `inject_await(method, name)` |
+| `SUBSCRIPT` | `obj[key]` access | `at_subscript("obj")` | `inject_subscript(method, name)` |
+
+---
+
 ## Location constraints
 
 Add `location=Loc(...)` to narrow matched nodes:

@@ -14,6 +14,7 @@ pytest -q                # run the full test suite
 ## Documentation
 
 - Full usage guide: [`docs/library_usage.md`](docs/library_usage.md)
+- Hook strategies: [`docs/hook_strategies.md`](docs/hook_strategies.md)
 - C accelerator: [`docs/accelerator.md`](docs/accelerator.md)
 - 中文文档：[`docs/library_usage_zh.md`](docs/library_usage_zh.md)
 
@@ -21,7 +22,19 @@ pytest -q                # run the full test suite
 
 ## Feature overview
 
-### Injection types
+### Hook strategies
+
+MixPy offers three interception strategies — use one or combine them:
+
+| Strategy | Mechanism | Injection types | Best for |
+|---|---|---|---|
+| **AST Rewriting** (default) | Import-time source transform | All 13 | Deterministic, zero-overhead interception |
+| **Monkey-Patch** | Runtime function replacement | HEAD, TAIL | Post-init patching, third-party code |
+| **sys.settrace** | Interpreter trace callback | HEAD, TAIL | Debugging, coverage, temporary hooks |
+
+See [`docs/hook_strategies.md`](docs/hook_strategies.md) for API details and examples.
+
+### Injection types (13)
 
 | Type | Where it fires | Typical use |
 |---|---|---|
@@ -33,6 +46,11 @@ pytest -q                # run the full test suite
 | `ATTRIBUTE` | Attribute write (`self.x = v`) | invariant guards |
 | `EXCEPTION` | `except` clause | fallback, error enrichment |
 | `YIELD` | Each `yield` expression | stream transformation |
+| `ATTR_READ` | Attribute read (`x = obj.attr`) | caching, lazy-load, access logging |
+| `LOOP` | `for`/`while` entry and exit | iteration guards, metrics |
+| `WITH` | Context manager enter/exit | resource tracking |
+| `AWAIT` | `await` expressions | async interception, caching |
+| `SUBSCRIPT` | `obj[key]` read/write | access control, proxy |
 
 ### Selector + location constraints
 
