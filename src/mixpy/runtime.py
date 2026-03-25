@@ -256,22 +256,23 @@ async def async_dispatch_injectors(injectors: List[Callable], ci: CallbackInfo, 
     inside ``async def`` target methods.
     """
     self_obj = cb_args[0] if cb_args else None
-    rest = list(cb_args[1:]) if len(cb_args) > 1 else []
-    ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=rest, kwargs=dict(cb_kwargs))
+    rest = cb_args[1:] if len(cb_args) > 1 else ()
+    ctx2 = _normalize_ctx(ci, ctx, self_obj=self_obj, args=list(rest), kwargs=dict(cb_kwargs))
     ci._ctx = ctx2
 
-    _trace = os.getenv("MIXIN_TRACE") == "True"
+    _trace = _TRACE_ENABLED
 
     for cb in injectors:
-        args_for_cb = list(rest)
-        kwargs_for_cb = dict(cb_kwargs)
         if ci.type == TYPE.INVOKE and ci._call_args is not None and ci._call_kwargs is not None:
-            args_for_cb = list(ci._call_args)
-            kwargs_for_cb = dict(ci._call_kwargs)
+            args_for_cb = ci._call_args
+            kwargs_for_cb = ci._call_kwargs
             ci._ctx["args"] = list(args_for_cb)
             ci._ctx["kwargs"] = dict(kwargs_for_cb)
             ci._ctx["call_args"] = list(args_for_cb)
             ci._ctx["call_kwargs"] = dict(kwargs_for_cb)
+        else:
+            args_for_cb = rest
+            kwargs_for_cb = cb_kwargs
 
         if _trace:
             from .debug import log_trace, log_cancel

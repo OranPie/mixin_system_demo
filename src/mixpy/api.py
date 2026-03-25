@@ -50,6 +50,8 @@ def configure(*, debug: bool | None = None, trace: bool | None = None, source_du
         os.environ["MIXIN_DEBUG"] = "True" if debug else "False"
     if trace is not None:
         os.environ["MIXIN_TRACE"] = "True" if trace else "False"
+        from .runtime import set_trace
+        set_trace(trace)
     if source_dump_dir is not None:
         from .debug import set_dump_dir
         set_dump_dir(source_dump_dir if source_dump_dir else None)

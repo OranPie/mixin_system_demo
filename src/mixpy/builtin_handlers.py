@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import ast
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from .model import TYPE, At
 from .handlers import Match, register_handler
 from .registry import InjectorSpec
 from .location_utils import _dotted_name_from_attribute
 from .selector import CallSelector
+
+if TYPE_CHECKING:
+    from .ast_index import ASTIndex
 
 def _self_expr(fn: ast.FunctionDef) -> ast.expr:
     if fn.args.args:
@@ -123,7 +126,7 @@ def _mk_if_value_set_return(ci_name: str) -> ast.If:
 class HeadHandler:
     type = TYPE.HEAD
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
         return [Match(node=fn.body[0] if fn.body else fn, parent=fn, field="body", index=0, at=at)]
 
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
@@ -164,7 +167,7 @@ class HeadHandler:
 class ParameterHandler:
     type = TYPE.PARAMETER
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
         out: List[Match] = []
         want = str(at.name)
         for i, a in enumerate(fn.args.args):
@@ -217,7 +220,12 @@ class ParameterHandler:
 class TailHandler:
     type = TYPE.TAIL
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        if index is not None:
+            return [
+                Match(node=node, parent=index.get_parent(node), field=None, index=None, at=at)
+                for node in index.all_returns
+            ]
         out: List[Match] = []
         class Finder(ast.NodeVisitor):
             def __init__(self): self.parents=[]
@@ -304,7 +312,13 @@ class TailHandler:
 class ConstHandler:
     type = TYPE.CONST
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        if index is not None:
+            return [
+                Match(node=node, parent=index.get_parent(node), field=None, index=None, at=at)
+                for node in index.all_constants
+                if node.value == at.name
+            ]
         matches: List[Match] = []
         class Finder(ast.NodeVisitor):
             def __init__(self): self.parents=[]
@@ -349,63 +363,69 @@ class ConstHandler:
 class InvokeHandler:
     type = TYPE.INVOKE
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
-        matches: List[Match] = []
+    @staticmethod
+    def _call_parts(n: ast.AST) -> Optional[Tuple[str, ...]]:
+        if isinstance(n, ast.Name):
+            return (n.id,)
+        if isinstance(n, ast.Attribute):
+            parts: List[str] = []
+            cur = n
+            while isinstance(cur, ast.Attribute):
+                parts.append(cur.attr)
+                cur = cur.value
+            if isinstance(cur, ast.Name):
+                parts.append(cur.id)
+                return tuple(reversed(parts))
+        return None
 
-        def call_parts(n: ast.AST) -> Optional[Tuple[str, ...]]:
-            if isinstance(n, ast.Name):
-                return (n.id,)
-            if isinstance(n, ast.Attribute):
-                parts=[]
-                cur=n
-                while isinstance(cur, ast.Attribute):
-                    parts.append(cur.attr)
-                    cur=cur.value
-                if isinstance(cur, ast.Name):
-                    parts.append(cur.id)
-                    return tuple(reversed(parts))
-            return None
+    @staticmethod
+    def _resolve_starstar(kw_value: ast.AST) -> Tuple[Dict[str, ast.AST], bool]:
+        if isinstance(kw_value, ast.Dict):
+            out: Dict[str, ast.AST] = {}
+            for k, v in zip(kw_value.keys, kw_value.values):
+                if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
+                    return {}, True
+                out[k.value] = v
+            return out, False
+        return {}, True
 
-        def resolve_starstar(kw_value: ast.AST) -> Tuple[Dict[str, ast.AST], bool]:
-            # If **{ "k": expr } literal, we can resolve keys; otherwise unknown.
-            if isinstance(kw_value, ast.Dict):
-                out: Dict[str, ast.AST] = {}
-                for k, v in zip(kw_value.keys, kw_value.values):
-                    if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
-                        return {}, True
-                    out[k.value] = v
-                return out, False
-            return {}, True
+    def _match_call(self, node: ast.Call, at: At) -> bool:
+        parts = self._call_parts(node.func)
+        dotted = ".".join(parts) if parts else None
+        if isinstance(at.selector, CallSelector):
+            kw: Dict[str, ast.AST] = {}
+            has_unknown = False
+            for k in node.keywords:
+                if k.arg is None:
+                    extra, unk = self._resolve_starstar(k.value)
+                    kw.update(extra)
+                    has_unknown = has_unknown or unk
+                else:
+                    kw[k.arg] = k.value
+            return at.selector.match(parts, node.args, kw, has_unresolved_starstar=has_unknown)
+        return dotted == str(at.name)
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        if index is not None:
+            matches: List[Match] = []
+            for node in index.all_calls:
+                if self._match_call(node, at):
+                    matches.append(Match(node=node, parent=index.get_parent(node), field=None, index=None, at=at))
+            return matches
+
+        matches = []
 
         class Finder(ast.NodeVisitor):
-            def __init__(self): self.parents=[]
-            def generic_visit(self, node):
-                self.parents.append(node)
+            def __init__(self_f): self_f.parents=[]
+            def generic_visit(self_f, node):
+                self_f.parents.append(node)
                 super().generic_visit(node)
-                self.parents.pop()
-            def visit_Call(self, node: ast.Call):
-                parts = call_parts(node.func)
-                dotted = ".".join(parts) if parts else None
-
-                ok = False
-                if isinstance(at.selector, CallSelector):
-                    kw: Dict[str, ast.AST] = {}
-                    has_unknown = False
-                    for k in node.keywords:
-                        if k.arg is None:
-                            extra, unk = resolve_starstar(k.value)
-                            kw.update(extra)
-                            has_unknown = has_unknown or unk
-                        else:
-                            kw[k.arg] = k.value
-                    ok = at.selector.match(parts, node.args, kw, has_unresolved_starstar=has_unknown)
-                else:
-                    ok = (dotted == str(at.name))
-
-                if ok:
-                    parent = self.parents[-1] if self.parents else None
+                self_f.parents.pop()
+            def visit_Call(self_f, node: ast.Call):
+                if self._match_call(node, at):
+                    parent = self_f.parents[-1] if self_f.parents else None
                     matches.append(Match(node=node, parent=parent, field=None, index=None, at=at))
-                self.generic_visit(node)
+                self_f.generic_visit(node)
 
         Finder().visit(fn)
         return matches
@@ -479,13 +499,29 @@ class InvokeHandler:
 class AttributeHandler:
     type = TYPE.ATTRIBUTE
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    @staticmethod
+    def _attr_dotted(n: ast.AST) -> Optional[str]:
+        parts = _dotted_name_from_attribute(n)
+        return ".".join(parts) if parts else None
+
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
         matches: List[Match] = []
         target_name = str(at.name)
 
-        def attr_dotted(n: ast.AST) -> Optional[str]:
-            parts = _dotted_name_from_attribute(n)
-            return ".".join(parts) if parts else None
+        if index is not None:
+            for node in index.get_nodes(ast.Assign):
+                for idx, t in enumerate(node.targets):
+                    if isinstance(t, ast.Attribute) and self._attr_dotted(t) == target_name:
+                        matches.append(Match(node=node, parent=index.get_parent(node), field="targets", index=idx, at=at))
+            for node in index.get_nodes(ast.AnnAssign):
+                t = node.target
+                if isinstance(t, ast.Attribute) and self._attr_dotted(t) == target_name:
+                    matches.append(Match(node=node, parent=index.get_parent(node), field="target", index=None, at=at))
+            for node in index.get_nodes(ast.AugAssign):
+                t = node.target
+                if isinstance(t, ast.Attribute) and self._attr_dotted(t) == target_name:
+                    matches.append(Match(node=node, parent=index.get_parent(node), field="target", index=None, at=at))
+            return matches
 
         class Finder(ast.NodeVisitor):
             def __init__(self): self.parents=[]
@@ -495,17 +531,17 @@ class AttributeHandler:
                 self.parents.pop()
             def visit_Assign(self, node: ast.Assign):
                 for idx, t in enumerate(node.targets):
-                    if isinstance(t, ast.Attribute) and attr_dotted(t) == target_name:
+                    if isinstance(t, ast.Attribute) and AttributeHandler._attr_dotted(t) == target_name:
                         matches.append(Match(node=node, parent=self.parents[-1] if self.parents else None, field="targets", index=idx, at=at))
                 self.generic_visit(node)
             def visit_AnnAssign(self, node: ast.AnnAssign):
                 t = node.target
-                if isinstance(t, ast.Attribute) and attr_dotted(t) == target_name:
+                if isinstance(t, ast.Attribute) and AttributeHandler._attr_dotted(t) == target_name:
                     matches.append(Match(node=node, parent=self.parents[-1] if self.parents else None, field="target", index=None, at=at))
                 self.generic_visit(node)
             def visit_AugAssign(self, node: ast.AugAssign):
                 t = node.target
-                if isinstance(t, ast.Attribute) and attr_dotted(t) == target_name:
+                if isinstance(t, ast.Attribute) and AttributeHandler._attr_dotted(t) == target_name:
                     matches.append(Match(node=node, parent=self.parents[-1] if self.parents else None, field="target", index=None, at=at))
                 self.generic_visit(node)
 
@@ -581,8 +617,7 @@ class AttributeHandler:
 class ExceptionHandler:
     type = TYPE.EXCEPTION
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
-        # One match representing the whole function body.
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
         return [Match(node=fn, parent=None, field="body", index=0, at=at)]
 
     def instrument(self, fn: ast.FunctionDef, matches: List[Match], injectors: List[InjectorSpec], target: str) -> None:
@@ -647,7 +682,12 @@ class YieldHandler:
 
     type = TYPE.YIELD
 
-    def find(self, fn: ast.FunctionDef, at: At) -> List[Match]:
+    def find(self, fn: ast.FunctionDef, at: At, index: Optional[ASTIndex] = None) -> List[Match]:
+        if index is not None:
+            return [
+                Match(node=node, parent=index.get_parent(node), field=None, index=None, at=at)
+                for node in index.all_yields
+            ]
         matches: List[Match] = []
 
         class Finder(ast.NodeVisitor):

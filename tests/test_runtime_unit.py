@@ -168,6 +168,8 @@ def test_eval_invoke_updated_args_flow_to_later_injectors():
 def test_dispatch_injectors_trace_mode_logs_to_stderr(capsys, monkeypatch):
     monkeypatch.setenv("MIXIN_TRACE", "True")
     monkeypatch.setenv("MIXPY_LOG_LEVEL", "DEBUG")
+    from mixpy.runtime import set_trace
+    set_trace(True)
 
     def cb(self_obj, ci, value):
         ci.cancel(result=42)
@@ -179,3 +181,4 @@ def test_dispatch_injectors_trace_mode_logs_to_stderr(capsys, monkeypatch):
     assert "[mixpy:DEBUG]" in captured.err
     assert "pkg.Player" in captured.err
     assert "cancelled" in captured.err
+    set_trace(False)
