@@ -207,6 +207,88 @@ Use `CallSelector` for structural matching:
 | `starstar_policy` | `STARSTAR_POLICY.IGNORE` | Unresolved `**expr` allowed; does not satisfy missing required keys. |
 | `starstar_policy` | `STARSTAR_POLICY.ASSUME_MATCH` | For `SUBSET`, missing required keys may be assumed present when unresolved `**expr` exists; `EXACT` behaves like `IGNORE`. |
 
+## Advanced Selectors
+
+### Pattern Matching Selectors
+
+- **`ArgRegex(pattern)`** — match string arguments by regex:
+  ```python
+  CallSelector(args=(ArgRegex(r"^error_"),))  # args starting with "error_"
+  ```
+
+- **`ArgTypeCheck(type_name)`** — match arguments by Python type:
+  ```python
+  CallSelector(args=(ArgTypeCheck("int"),))  # integer literal args
+  ```
+
+- **`ArgExpr(code)`** — match with custom expression:
+  ```python
+  CallSelector(args=(ArgExpr("isinstance(node, ast.Constant) and node.value > 0"),))
+  ```
+
+### Composite Patterns
+
+Combine patterns with boolean logic:
+```python
+from mixpy import AndPattern, OrPattern, NotPattern
+
+# Match int OR float constants
+OrPattern(patterns=(ArgTypeCheck("int"), ArgTypeCheck("float")))
+
+# Match non-negative integers
+AndPattern(patterns=(ArgTypeCheck("int"), ArgExpr("node.value >= 0")))
+
+# Match anything except None
+NotPattern(pattern=ArgConst(None))
+```
+
+### Wildcard Name Matching
+
+```python
+from mixpy import WildcardSelector, CallSelector
+
+# Match any self.calc_* method call
+CallSelector(func=WildcardSelector.of("self.calc_*"))
+```
+
+---
+
+## Fluent Builder API
+
+The `At` and `Loc` classes provide fluent factory methods for concise injection point specification.
+
+### At Factories
+```python
+At.head()                    # HEAD injection
+At.tail()                    # TAIL injection
+At.invoke("print")           # INVOKE injection targeting print()
+At.const(42)                 # CONST injection for literal 42
+At.parameter("x")            # PARAMETER injection for arg x
+At.attribute("hp")           # ATTRIBUTE injection for .hp writes
+At.exception()               # EXCEPTION injection
+At.yield_()                  # YIELD injection
+```
+
+### Chaining
+```python
+At.invoke("print").first()                    # First print() call only
+At.invoke("print").last()                     # Last print() call only
+At.invoke("print").where(When("x", OP.GT, 0))  # Conditional
+At.const(42).nth(2)                           # Third occurrence (0-based)
+At.invoke("calc").at_line(42)                 # At specific line
+```
+
+### Loc Factories
+```python
+Loc.between(at1, at2)          # Between two anchors
+Loc.after(at1)                 # Everything after anchor
+Loc.before(at1)                # Everything before anchor
+Loc.within(3, of=at1)          # Within 3 statements of anchor
+Loc.relative_to(at1, offset=1) # One position after anchor
+```
+
+---
+
 ## Location constraints
 
 Add `location=Loc(...)` to narrow matched nodes:

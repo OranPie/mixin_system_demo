@@ -14,6 +14,7 @@ pytest -q                # run the full test suite
 ## Documentation
 
 - Full usage guide: [`docs/library_usage.md`](docs/library_usage.md)
+- C accelerator: [`docs/accelerator.md`](docs/accelerator.md)
 - 中文文档：[`docs/library_usage_zh.md`](docs/library_usage_zh.md)
 
 ---
@@ -42,6 +43,15 @@ pytest -q                # run the full test suite
 - `starstar_policy` for unresolved `**kwargs` (`FAIL` / `IGNORE` / `ASSUME_MATCH`)
 
 Location filters let you target the *Nth* match, a slice between anchors, or only nodes *near* a given statement.
+
+### New in this release
+
+| Feature | Description |
+|---|---|
+| **Advanced selectors** | `ArgRegex`, `ArgTypeCheck`, `ArgExpr` for flexible argument matching; `AndPattern` / `OrPattern` / `NotPattern` for boolean composition; `WildcardSelector` for glob-style name matching |
+| **Fluent builder API** | `At.invoke("print").first()`, `Loc.between(a, b)` — concise, chainable injection point construction |
+| **C accelerator** | Optional `_accel` C extension for 2–5× faster runtime dispatch; pure-Python fallback is automatic. See [`docs/accelerator.md`](docs/accelerator.md) |
+| **Performance** | AST index cache (`ast_index.py`) eliminates repeated `ast.walk()` calls; memoized trace flag and pre-compiled regex in runtime |
 
 ### Networking demo
 
