@@ -83,18 +83,28 @@ def _find_matches_raw(fn: ast.FunctionDef, at: At):
     handler = get_handler(at.type)
     return handler.find(fn, at)
 
-def _anchor_pos(fn: ast.FunctionDef, parents: Dict[int, ast.AST], stmt_idx: Dict[int, int], anchor_at: At) -> Optional[Tuple[int, int]]:
+def _anchor_pos(fn: ast.FunctionDef, parents: Dict[int, ast.AST], stmt_idx: Dict[int, int], anchor_at: At, _memo: Optional[Dict] = None) -> Optional[Tuple[int, int]]:
+    memo_key = (id(fn), anchor_at)
+    if _memo is not None and memo_key in _memo:
+        return _memo[memo_key]
     raw = _find_matches_raw(fn, anchor_at)
-    matches = apply_location(fn, raw, anchor_at)
+    matches = apply_location(fn, raw, anchor_at, _memo=_memo)
     if not matches:
-        return None
-    keys = sorted(_order_key(fn, m.node, parents, stmt_idx) for m in matches)
-    return keys[0] if keys else None
+        result = None
+    else:
+        keys = sorted(_order_key(fn, m.node, parents, stmt_idx) for m in matches)
+        result = keys[0] if keys else None
+    if _memo is not None:
+        _memo[memo_key] = result
+    return result
 
-def apply_location(fn: ast.FunctionDef, matches, at: At):
+def apply_location(fn: ast.FunctionDef, matches, at: At, _memo: Optional[Dict] = None):
     loc: Optional[Loc] = at.location
     if not loc:
         return matches
+
+    if _memo is None:
+        _memo = {}
 
     parents = _build_parent_map(fn)
     stmt_idx = _stmt_index(fn)
@@ -107,8 +117,8 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
     # slice filter (supports one-sided)
     if loc.slice:
         s: SliceSpec = loc.slice
-        start = _anchor_pos(fn, parents, stmt_idx, s.from_anchor) if s.from_anchor else None
-        end = _anchor_pos(fn, parents, stmt_idx, s.to_anchor) if s.to_anchor else None
+        start = _anchor_pos(fn, parents, stmt_idx, s.from_anchor, _memo) if s.from_anchor else None
+        end = _anchor_pos(fn, parents, stmt_idx, s.to_anchor, _memo) if s.to_anchor else None
 
         def ge(a,b): return a[0] > b[0] or (a[0]==b[0] and a[1] >= b[1])
         def gt(a,b): return a[0] > b[0] or (a[0]==b[0] and a[1] > b[1])
@@ -133,7 +143,7 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
     # near filter (statement distance)
     if loc.near:
         n: NearSpec = loc.near
-        apos = _anchor_pos(fn, parents, stmt_idx, n.anchor)
+        apos = _anchor_pos(fn, parents, stmt_idx, n.anchor, _memo)
         if apos is None:
             matches_sorted = []
         else:
@@ -143,7 +153,7 @@ def apply_location(fn: ast.FunctionDef, matches, at: At):
     # anchor-relative selection
     if loc.anchor:
         a: AnchorSpec = loc.anchor
-        apos = _anchor_pos(fn, parents, stmt_idx, a.anchor)
+        apos = _anchor_pos(fn, parents, stmt_idx, a.anchor, _memo)
         if apos is None:
             matches_sorted = []
         else:
